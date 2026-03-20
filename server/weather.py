@@ -1,28 +1,28 @@
-"""Weather query — fetches current conditions from Open-Meteo API (live) with Delta table cache.
+"""Weather service — queries Delta table (7-day hourly forecasts), falls back to Open-Meteo API.
 
-Uses Open-Meteo forecast API for real-time BOM-equivalent data for Essential Energy depot areas.
-Falls back to Delta table cache if API is unavailable.
+Delta table `bom_weather` contains hourly forecasts for 19 Essential Energy depot areas,
+refreshed hourly via scheduled job. API fallback if data is missing or stale (>2 days).
 """
 
 import aiohttp
-import json
+from datetime import datetime, timedelta
+
 from server.config import get_oauth_token, get_workspace_host
 
 WAREHOUSE_ID = "c2abb17a6c9e6bc0"
 TABLE = "zivile.essential_energy_wacs.bom_weather"
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+STALE_HOURS = 48  # fallback to API if data older than this
 
-# WMO weather code descriptions
 WMO_CODES = {
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
     45: "Fog", 48: "Depositing rime fog",
     51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
     61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
-    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
     80: "Light rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
     95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm with hail",
 }
 
-# Essential Energy depot locations with coordinates
 DEPOTS = {
     "grafton":         {"name": "Grafton",         "lat": -29.69, "lon": 152.93},
     "coffs harbour":   {"name": "Coffs Harbour",   "lat": -30.30, "lon": 153.11},
@@ -48,46 +48,175 @@ DEPOTS = {
     "bega":            {"name": "Bega",             "lat": -36.67, "lon": 149.84},
 }
 
-# Unique stations for bulk refresh (deduped by name)
-_UNIQUE_STATIONS = {}
-for d in DEPOTS.values():
-    _UNIQUE_STATIONS[d["name"]] = d
-STATIONS = list(_UNIQUE_STATIONS.values())
-
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-
 
 def _match_depot(location: str) -> dict:
-    """Match location string to depot info."""
     loc = location.lower().strip()
     if loc in DEPOTS:
         return DEPOTS[loc]
     for key, info in DEPOTS.items():
         if key in loc or loc in key:
             return info
-    return DEPOTS.get("grafton", {"name": "Grafton", "lat": -29.69, "lon": 152.93})
+    return DEPOTS.get("grafton")
 
 
-async def _fetch_open_meteo(lat: float, lon: float, forecast_date: str | None = None) -> dict | None:
-    """Fetch weather from Open-Meteo API. If forecast_date given, returns hourly forecast for that day."""
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "timezone": "Australia/Sydney",
-        "wind_speed_unit": "kmh",
-    }
-    if forecast_date:
-        # Hourly forecast for the specific date
+def _safety_warnings(temp, wind, gust, code, precip) -> list[str]:
+    """Generate safety warnings from weather values."""
+    warnings = []
+    if temp is not None and temp >= 35:
+        warnings.append(f"HEAT WARNING: Temperature {temp}°C. Ensure adequate hydration, rest breaks, and shade.")
+    if temp is not None and temp >= 40:
+        warnings.append("EXTREME HEAT: Consider rescheduling non-critical outdoor work.")
+    if wind is not None and wind >= 40:
+        warnings.append(f"WIND WARNING: Wind speed {wind} km/h. Review suitability for elevated work and crane operations.")
+    if gust is not None and gust >= 60:
+        warnings.append(f"GUST WARNING: Gusts to {gust} km/h. Suspend elevated work activities.")
+    if code is not None and code >= 95:
+        warnings.append("THUNDERSTORM WARNING: Suspend all outdoor electrical work. Seek shelter immediately.")
+    if code is not None and code in (65, 82):
+        warnings.append("HEAVY RAIN: Check for flooding, slippery conditions, reduced visibility.")
+    if precip is not None and precip >= 10:
+        warnings.append(f"RAIN WARNING: {precip}mm precipitation. Check site drainage and access roads.")
+    return warnings
+
+
+async def _run_sql(sql: str) -> list[list] | None:
+    """Execute SQL via warehouse REST API. Returns data_array or None."""
+    host = get_workspace_host()
+    token = get_oauth_token()
+    payload = {"statement": sql, "warehouse_id": WAREHOUSE_ID, "format": "JSON_ARRAY", "wait_timeout": "30s"}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{host}/api/2.0/sql/statements/", json=payload, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                data = await resp.json()
+        state = data.get("status", {}).get("state", "")
+        if state == "SUCCEEDED":
+            return data.get("result", {}).get("data_array", [])
+    except Exception as e:
+        print(f"[WEATHER] SQL error: {e}")
+    return None
+
+
+async def _query_delta_current(station_name: str) -> str | None:
+    """Get current conditions from Delta table."""
+    sql = (
+        f"SELECT station_name, observation_time, temperature, apparent_temperature, "
+        f"humidity, wind_speed_kmh, wind_gust_kmh, wind_direction, precipitation, "
+        f"weather_code, weather_description, cloud_cover, refreshed_at "
+        f"FROM {TABLE} WHERE station_name = '{station_name}' "
+        f"AND forecast_type = 'current' "
+        f"ORDER BY observation_time DESC LIMIT 1"
+    )
+    rows = await _run_sql(sql)
+    if not rows:
+        return None
+
+    r = rows[0]
+    # Check staleness
+    refreshed = r[12]
+    if refreshed:
+        try:
+            ref_dt = datetime.fromisoformat(str(refreshed).replace('Z', '+00:00'))
+            if (datetime.now(ref_dt.tzinfo) - ref_dt).total_seconds() > STALE_HOURS * 3600:
+                print(f"[WEATHER] Delta data stale for {station_name} (refreshed {refreshed})")
+                return None
+        except Exception:
+            pass
+
+    temp, app_temp = r[2], r[3]
+    humidity, wind, gust = r[4], r[5], r[6]
+    wind_dir, precip, code = r[7], r[8], r[9]
+    desc, cloud = r[10] or "", r[11]
+
+    lines = [
+        f"**Current Weather — {station_name}**",
+        f"Observation: {r[1]} AEST",
+        f"Conditions: {desc}" + (f" ({cloud}% cloud cover)" if cloud is not None else ""),
+        f"Temperature: {temp}°C (feels like {app_temp}°C)" if temp is not None else None,
+        f"Humidity: {humidity}%" if humidity is not None else None,
+        f"Wind: {wind_dir} {wind} km/h" + (f" (gusts {gust} km/h)" if gust else "") if wind is not None else None,
+        f"Precipitation: {precip} mm" if precip is not None and float(precip) > 0 else None,
+    ]
+
+    warnings = _safety_warnings(
+        float(temp) if temp else None, float(wind) if wind else None,
+        float(gust) if gust else None, int(code) if code else None,
+        float(precip) if precip else None,
+    )
+    result = "\n".join(l for l in lines if l)
+    if warnings:
+        result += "\n\n**Safety Alerts:**\n" + "\n".join(f"- {w}" for w in warnings)
+    return result
+
+
+async def _query_delta_forecast(station_name: str, target_date: str) -> str | None:
+    """Get hourly forecast for a specific date from Delta table."""
+    sql = (
+        f"SELECT observation_time, temperature, apparent_temperature, humidity, "
+        f"wind_speed_kmh, wind_gust_kmh, weather_code, precipitation, refreshed_at "
+        f"FROM {TABLE} WHERE station_name = '{station_name}' "
+        f"AND forecast_type = 'hourly_forecast' "
+        f"AND CAST(observation_time AS DATE) = '{target_date}' "
+        f"AND HOUR(observation_time) BETWEEN 6 AND 18 "
+        f"ORDER BY observation_time"
+    )
+    rows = await _run_sql(sql)
+    if not rows or len(rows) < 3:
+        return None
+
+    # Check staleness
+    refreshed = rows[0][8]
+    if refreshed:
+        try:
+            ref_dt = datetime.fromisoformat(str(refreshed).replace('Z', '+00:00'))
+            if (datetime.now(ref_dt.tzinfo) - ref_dt).total_seconds() > STALE_HOURS * 3600:
+                return None
+        except Exception:
+            pass
+
+    temps = [float(r[1]) for r in rows if r[1] is not None]
+    winds = [float(r[4]) for r in rows if r[4] is not None]
+    gusts = [float(r[5]) for r in rows if r[5] is not None]
+    codes = [int(r[6]) for r in rows if r[6] is not None]
+    precip_total = sum(float(r[7]) for r in rows if r[7] is not None)
+
+    worst_code = max(codes) if codes else 0
+    desc = WMO_CODES.get(worst_code, f"Code {worst_code}")
+
+    lines = [
+        f"**Weather Forecast — {station_name} ({target_date})**",
+        f"Work hours (6am-6pm):",
+        f"Conditions: {desc}",
+        f"Temperature: {min(temps):.0f}°C to {max(temps):.0f}°C" if temps else None,
+        f"Max wind: {max(winds):.0f} km/h" + (f" (gusts to {max(gusts):.0f} km/h)" if gusts else "") if winds else None,
+        f"Total precipitation: {precip_total:.1f} mm" if precip_total > 0 else "No rain expected",
+    ]
+
+    warnings = _safety_warnings(
+        max(temps) if temps else None, max(winds) if winds else None,
+        max(gusts) if gusts else None, worst_code, precip_total,
+    )
+    result = "\n".join(l for l in lines if l)
+    if warnings:
+        result += "\n\n**Safety Alerts:**\n" + "\n".join(f"- {w}" for w in warnings)
+    return result
+
+
+async def _fetch_api_fallback(lat: float, lon: float, target_date: str | None = None) -> str | None:
+    """Fallback: fetch directly from Open-Meteo API."""
+    params = {"latitude": lat, "longitude": lon, "timezone": "Australia/Sydney", "wind_speed_unit": "kmh"}
+    if target_date:
         params["hourly"] = "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code,precipitation"
-        params["start_date"] = forecast_date
-        params["end_date"] = forecast_date
+        params["start_date"] = target_date
+        params["end_date"] = target_date
     else:
-        # Current conditions
         params["current"] = "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code,precipitation,cloud_cover"
         params["forecast_days"] = 1
 
     url = OPEN_METEO_URL + "?" + "&".join(f"{k}={v}" for k, v in params.items())
-
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
@@ -95,249 +224,106 @@ async def _fetch_open_meteo(lat: float, lon: float, forecast_date: str | None = 
                     return None
                 return await resp.json()
     except Exception as e:
-        print(f"[WEATHER] Open-Meteo error: {e}")
-        return None
-
-
-async def _fetch_delta_fallback(station_name: str) -> str | None:
-    """Fallback: query Delta table cache."""
-    host = get_workspace_host()
-    token = get_oauth_token()
-    sql = (
-        f"SELECT station_name, observation_time, temperature, apparent_temperature, "
-        f"humidity, wind_speed_kmh, wind_gust_kmh, wind_direction, rain_since_9am, "
-        f"weather_description "
-        f"FROM {TABLE} WHERE station_name = '{station_name}' "
-        f"ORDER BY observation_time DESC LIMIT 1"
-    )
-    payload = {"statement": sql, "warehouse_id": WAREHOUSE_ID, "format": "JSON_ARRAY", "wait_timeout": "30s"}
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{host}/api/2.0/sql/statements/", json=payload, headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                data = await resp.json()
-        rows = data.get("result", {}).get("data_array", [])
-        if not rows:
-            return None
-        r = rows[0]
-        return (
-            f"**Current Weather — {r[0]}** (cached)\n"
-            f"Observation: {r[1]}\n"
-            f"Temperature: {r[2]}°C (feels like {r[3]}°C)\n"
-            f"Humidity: {r[4]}%\n"
-            f"Wind: {r[7]} {r[5]} km/h" + (f" (gusts {r[6]} km/h)" if r[6] else "") + "\n"
-            f"Rain since 9am: {r[8]} mm\n"
-            f"Conditions: {r[9]}"
-        )
-    except Exception as e:
-        print(f"[WEATHER] Delta fallback error: {e}")
+        print(f"[WEATHER] API fallback error: {e}")
         return None
 
 
 def _parse_date_from_location(location: str) -> str | None:
-    """Extract a date reference from the location string (e.g. 'Grafton tomorrow')."""
+    """Extract a date reference from the location string."""
     import re
-    from datetime import date, timedelta
-    lower = location.lower()
-    today = date(2026, 3, 20)  # Demo date
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("Australia/Sydney")).date()
+    except Exception:
+        today = datetime.utcnow().date()
 
+    lower = location.lower()
     if "tomorrow" in lower:
         return (today + timedelta(days=1)).isoformat()
     if "day after" in lower:
         return (today + timedelta(days=2)).isoformat()
+    if "monday" in lower:
+        days_ahead = (0 - today.weekday()) % 7 or 7
+        return (today + timedelta(days=days_ahead)).isoformat()
 
-    # Match explicit dates like "March 21" or "2026-03-21"
     m = re.search(r'(\d{4})-(\d{2})-(\d{2})', lower)
     if m:
+        from datetime import date
         d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         if d > today:
             return d.isoformat()
 
-    m = re.search(r'march\s+(\d{1,2})', lower)
-    if m:
-        d = date(2026, 3, int(m.group(1)))
-        if d > today:
-            return d.isoformat()
-
-    m = re.search(r'april\s+(\d{1,2})', lower)
-    if m:
-        d = date(2026, 4, int(m.group(1)))
-        if d > today:
-            return d.isoformat()
+    for month_name, month_num in [("march", 3), ("april", 4), ("may", 5)]:
+        m = re.search(rf'{month_name}\s+(\d{{1,2}})', lower)
+        if m:
+            from datetime import date
+            d = date(2026, month_num, int(m.group(1)))
+            if d > today:
+                return d.isoformat()
 
     return None
 
 
 async def query_weather(location: str) -> str:
-    """Get weather for a depot area. Current for today, forecast for future dates."""
+    """Get weather for a depot area. Delta table first, API fallback if stale or missing."""
     depot = _match_depot(location)
     station_name = depot["name"]
     forecast_date = _parse_date_from_location(location)
 
-    # Try Open-Meteo live API
-    data = await _fetch_open_meteo(depot["lat"], depot["lon"], forecast_date=forecast_date)
-
-    if data and "current" in data:
-        c = data["current"]
-        temp = c.get("temperature_2m")
-        app_temp = c.get("apparent_temperature")
-        humidity = c.get("relative_humidity_2m")
-        wind = c.get("wind_speed_10m")
-        gust = c.get("wind_gusts_10m")
-        precip = c.get("precipitation")
-        code = c.get("weather_code", 0)
-        cloud = c.get("cloud_cover")
-        obs_time = c.get("time", "")
-
-        desc = WMO_CODES.get(code, f"Code {code}")
-
-        lines = [
-            f"**Current Weather — {station_name}**",
-            f"Observation: {obs_time} AEST",
-            f"Conditions: {desc}" + (f" ({cloud}% cloud cover)" if cloud is not None else ""),
-            f"Temperature: {temp}°C (feels like {app_temp}°C)" if temp is not None else None,
-            f"Humidity: {humidity}%" if humidity is not None else None,
-            f"Wind: {wind} km/h" + (f" (gusts {gust} km/h)" if gust else "") if wind is not None else None,
-            f"Precipitation: {precip} mm" if precip is not None and precip > 0 else None,
-        ]
-
-        warnings = []
-        if temp is not None and temp >= 35:
-            warnings.append(f"HEAT WARNING: Temperature {temp}°C. Ensure adequate hydration, rest breaks, and shade.")
-        if temp is not None and temp >= 40:
-            warnings.append("EXTREME HEAT: Consider rescheduling non-critical outdoor work.")
-        if wind is not None and wind >= 40:
-            warnings.append(f"WIND WARNING: Wind speed {wind} km/h. Review suitability for elevated work and crane operations.")
-        if gust is not None and gust >= 60:
-            warnings.append(f"GUST WARNING: Gusts to {gust} km/h. Suspend elevated work activities.")
-        if code >= 95:
-            warnings.append("THUNDERSTORM WARNING: Suspend all outdoor electrical work. Seek shelter immediately.")
-        if code in (65, 82):
-            warnings.append("HEAVY RAIN: Check for flooding, slippery conditions, reduced visibility.")
-        if precip is not None and precip >= 10:
-            warnings.append(f"RAIN WARNING: {precip}mm precipitation. Check site drainage and access roads.")
-
-        result = "\n".join(l for l in lines if l)
-        if warnings:
-            result += "\n\n**Safety Alerts:**\n" + "\n".join(f"- {w}" for w in warnings)
-        return result
-
-    # Handle hourly forecast response (future dates)
-    if data and "hourly" in data:
-        h = data["hourly"]
-        times = h.get("time", [])
-        temps = h.get("temperature_2m", [])
-        app_temps = h.get("apparent_temperature", [])
-        humidities = h.get("relative_humidity_2m", [])
-        winds = h.get("wind_speed_10m", [])
-        gusts = h.get("wind_gusts_10m", [])
-        codes = h.get("weather_code", [])
-        precips = h.get("precipitation", [])
-
-        if not times:
-            return f"(No forecast data available for {station_name} on {forecast_date})"
-
-        # Summarize key work hours (6am-6pm)
-        work_temps, work_winds, work_gusts, work_precip, work_codes = [], [], [], 0.0, []
-        for i, t in enumerate(times):
-            hour = int(t.split("T")[1].split(":")[0]) if "T" in t else 0
-            if 6 <= hour <= 18:
-                if i < len(temps) and temps[i] is not None: work_temps.append(temps[i])
-                if i < len(winds) and winds[i] is not None: work_winds.append(winds[i])
-                if i < len(gusts) and gusts[i] is not None: work_gusts.append(gusts[i])
-                if i < len(precips) and precips[i] is not None: work_precip += precips[i]
-                if i < len(codes) and codes[i] is not None: work_codes.append(codes[i])
-
-        min_temp = min(work_temps) if work_temps else None
-        max_temp = max(work_temps) if work_temps else None
-        max_wind = max(work_winds) if work_winds else None
-        max_gust = max(work_gusts) if work_gusts else None
-        worst_code = max(work_codes) if work_codes else 0
-        desc = WMO_CODES.get(worst_code, f"Code {worst_code}")
-
-        lines = [
-            f"**Weather Forecast — {station_name} ({forecast_date})**",
-            f"Work hours (6am-6pm):",
-            f"Conditions: {desc}",
-            f"Temperature: {min_temp}°C to {max_temp}°C" if min_temp is not None else None,
-            f"Max wind: {max_wind} km/h" + (f" (gusts to {max_gust} km/h)" if max_gust else "") if max_wind is not None else None,
-            f"Total precipitation: {round(work_precip, 1)} mm" if work_precip > 0 else "No rain expected",
-        ]
-
-        warnings = []
-        if max_temp is not None and max_temp >= 35:
-            warnings.append(f"HEAT WARNING: Forecast max {max_temp}°C. Plan hydration breaks and shade.")
-        if max_wind is not None and max_wind >= 40:
-            warnings.append(f"WIND WARNING: Forecast winds to {max_wind} km/h. Review elevated work plans.")
-        if max_gust is not None and max_gust >= 60:
-            warnings.append(f"GUST WARNING: Forecast gusts to {max_gust} km/h. May need to suspend elevated work.")
-        if worst_code >= 95:
-            warnings.append("THUNDERSTORM FORECAST: Plan for possible work stoppages.")
-        if work_precip >= 10:
-            warnings.append(f"RAIN FORECAST: {round(work_precip, 1)}mm expected. Check site access and drainage.")
-
-        result = "\n".join(l for l in lines if l)
-        if warnings:
-            result += "\n\n**Safety Alerts:**\n" + "\n".join(f"- {w}" for w in warnings)
-        return result
-
-    # Fallback to Delta cache (current conditions only)
-    if not forecast_date:
-        fallback = await _fetch_delta_fallback(station_name)
-        if fallback:
-            return fallback
+    # Try Delta table first
+    if forecast_date:
+        result = await _query_delta_forecast(station_name, forecast_date)
+        if result:
+            return result
+        # API fallback for forecast
+        print(f"[WEATHER] Delta forecast miss for {station_name} {forecast_date}, trying API")
+        api_data = await _fetch_api_fallback(depot["lat"], depot["lon"], target_date=forecast_date)
+        if api_data and "hourly" in api_data:
+            h = api_data["hourly"]
+            times = h.get("time", [])
+            temps = [h.get("temperature_2m", [None]*999)[i] for i in range(len(times))
+                     if 6 <= int(times[i].split("T")[1].split(":")[0]) <= 18 and h.get("temperature_2m", [None]*999)[i] is not None]
+            winds = [h.get("wind_speed_10m", [None]*999)[i] for i in range(len(times))
+                     if 6 <= int(times[i].split("T")[1].split(":")[0]) <= 18 and h.get("wind_speed_10m", [None]*999)[i] is not None]
+            gusts = [h.get("wind_gusts_10m", [None]*999)[i] for i in range(len(times))
+                     if 6 <= int(times[i].split("T")[1].split(":")[0]) <= 18 and h.get("wind_gusts_10m", [None]*999)[i] is not None]
+            codes = [h.get("weather_code", [0]*999)[i] or 0 for i in range(len(times))
+                     if 6 <= int(times[i].split("T")[1].split(":")[0]) <= 18]
+            precip = sum(h.get("precipitation", [0]*999)[i] or 0 for i in range(len(times))
+                        if 6 <= int(times[i].split("T")[1].split(":")[0]) <= 18)
+            if temps:
+                worst_code = max(codes) if codes else 0
+                lines = [
+                    f"**Weather Forecast — {station_name} ({forecast_date})**",
+                    f"Work hours (6am-6pm):",
+                    f"Conditions: {WMO_CODES.get(worst_code, '')}",
+                    f"Temperature: {min(temps):.0f}°C to {max(temps):.0f}°C",
+                    f"Max wind: {max(winds):.0f} km/h" + (f" (gusts to {max(gusts):.0f} km/h)" if gusts else ""),
+                    f"Total precipitation: {precip:.1f} mm" if precip > 0 else "No rain expected",
+                ]
+                warnings = _safety_warnings(max(temps), max(winds) if winds else None, max(gusts) if gusts else None, worst_code, precip)
+                result = "\n".join(l for l in lines if l)
+                if warnings:
+                    result += "\n\n**Safety Alerts:**\n" + "\n".join(f"- {w}" for w in warnings)
+                return result
+    else:
+        result = await _query_delta_current(station_name)
+        if result:
+            return result
+        # API fallback for current
+        print(f"[WEATHER] Delta current miss for {station_name}, trying API")
+        api_data = await _fetch_api_fallback(depot["lat"], depot["lon"])
+        if api_data and "current" in api_data:
+            c = api_data["current"]
+            code = c.get("weather_code", 0) or 0
+            lines = [
+                f"**Current Weather — {station_name}** (live)",
+                f"Observation: {c.get('time', '')} AEST",
+                f"Conditions: {WMO_CODES.get(code, '')}",
+                f"Temperature: {c.get('temperature_2m')}°C (feels like {c.get('apparent_temperature')}°C)",
+                f"Humidity: {c.get('relative_humidity_2m')}%",
+                f"Wind: {c.get('wind_speed_10m')} km/h (gusts {c.get('wind_gusts_10m')} km/h)",
+            ]
+            return "\n".join(l for l in lines if l)
 
     return f"(No weather data available for {station_name})"
-
-
-async def fetch_all_stations() -> list[dict]:
-    """Fetch current weather for all Essential Energy stations. Used by refresh job."""
-    lats = ",".join(str(s["lat"]) for s in STATIONS)
-    lons = ",".join(str(s["lon"]) for s in STATIONS)
-
-    params = {
-        "latitude": lats,
-        "longitude": lons,
-        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,precipitation",
-        "timezone": "Australia/Sydney",
-        "wind_speed_unit": "kmh",
-    }
-    url = OPEN_METEO_URL + "?" + "&".join(f"{k}={v}" for k, v in params.items())
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            data = await resp.json()
-
-    # Multi-location returns array
-    results_list = data if isinstance(data, list) else [data]
-
-    rows = []
-    for i, result in enumerate(results_list):
-        if i >= len(STATIONS):
-            break
-        station = STATIONS[i]
-        c = result.get("current", {})
-        code = c.get("weather_code", 0)
-        wind_dir_deg = c.get("wind_direction_10m")
-        # Convert degrees to compass
-        dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
-        wind_dir = dirs[int((wind_dir_deg + 11.25) / 22.5) % 16] if wind_dir_deg is not None else ""
-
-        rows.append({
-            "station_name": station["name"],
-            "observation_time": c.get("time", ""),
-            "temperature": c.get("temperature_2m"),
-            "apparent_temperature": c.get("apparent_temperature"),
-            "humidity": c.get("relative_humidity_2m"),
-            "wind_speed_kmh": c.get("wind_speed_10m"),
-            "wind_gust_kmh": c.get("wind_gusts_10m"),
-            "wind_direction": wind_dir,
-            "rain_since_9am": c.get("precipitation"),
-            "weather_description": WMO_CODES.get(code, f"Code {code}"),
-        })
-
-    return rows

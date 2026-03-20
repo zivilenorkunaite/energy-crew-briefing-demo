@@ -160,9 +160,10 @@ TOOLS = [
         "function": {
             "name": "query_weather",
             "description": (
-                "Get current BOM weather observations for a depot area in NSW. "
+                "Get weather for a depot area in NSW — current conditions or forecast for a future date. "
                 "Returns temperature, wind, humidity, rain, and safety warnings. "
-                "Use when preparing crew briefings or when asked about weather conditions."
+                "Use when preparing crew briefings or when asked about weather conditions. "
+                "Set the date parameter for future dates (forecasts), or omit for current conditions."
             ),
             "parameters": {
                 "type": "object",
@@ -170,8 +171,15 @@ TOOLS = [
                     "location": {
                         "type": "string",
                         "description": (
-                            "Town, suburb, or depot area to get weather for. "
+                            "Town, suburb, or depot area. "
                             "Examples: 'Grafton', 'Coffs Harbour', 'Orange', 'Dubbo'"
+                        ),
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": (
+                            "Optional — date for forecast in YYYY-MM-DD format. "
+                            "Omit for current weather. Examples: '2026-03-23', '2026-03-25'"
                         ),
                     },
                 },
@@ -327,9 +335,12 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
 
     elif name == "query_weather":
         location = args.get("location", "")
-        print(f"[AGENT] Weather query: {location}")
+        date = args.get("date") or None
+        print(f"[AGENT] Weather query: {location} | date={date}")
         try:
-            result = await query_weather(location)
+            # Pass date in location string so weather.py can parse it
+            loc_with_date = f"{location} {date}" if date else location
+            result = await query_weather(loc_with_date)
         except BaseException as e:
             msg = _unwrap_exception(e)
             print(f"[AGENT] Weather error: {msg}")
