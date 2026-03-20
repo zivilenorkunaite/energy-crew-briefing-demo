@@ -592,6 +592,25 @@ def insert_tasks(tasks: list[dict]):
             print(f"  Batch {i//batch_size + 1}: {len(batch)} rows OK")
 
 
+def optimize_tables():
+    """Apply liquid clustering and OPTIMIZE for query performance."""
+    print("\n=== Optimizing tables ===")
+
+    print("  Liquid clustering: work_orders (assigned_crew, scheduled_date)")
+    run_sql(f"ALTER TABLE {SCHEMA}.work_orders CLUSTER BY (assigned_crew, scheduled_date)")
+
+    print("  Liquid clustering: work_tasks (work_order_id, scheduled_datetime)")
+    run_sql(f"ALTER TABLE {SCHEMA}.work_tasks CLUSTER BY (work_order_id, scheduled_datetime)")
+
+    print("  OPTIMIZE work_orders...")
+    run_sql(f"OPTIMIZE {SCHEMA}.work_orders")
+
+    print("  OPTIMIZE work_tasks...")
+    run_sql(f"OPTIMIZE {SCHEMA}.work_tasks")
+
+    print("  Done.")
+
+
 def update_system_prompt_date_note():
     """Print the updated crew names for the agent system prompt."""
     crew_names = sorted(CREWS.keys())
@@ -609,6 +628,7 @@ if __name__ == "__main__":
     wos, tasks = generate_work_orders()
     insert_work_orders(wos)
     insert_tasks(tasks)
+    optimize_tables()
     update_system_prompt_date_note()
 
     print("\n=== Done ===")

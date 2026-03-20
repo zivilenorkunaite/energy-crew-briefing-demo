@@ -226,4 +226,11 @@ if __name__ == "__main__":
     step1_create_table()
     step2_seed_data()
     step3_grant_sp()
+
+    # Liquid clustering for query performance
+    print("\n=== Step 4: Optimize table ===")
+    run_sql(f"ALTER TABLE {TABLE} CLUSTER BY (station_name, observation_time)")
+    run_sql(f"OPTIMIZE {TABLE}")
+    print("  Liquid clustering applied.")
+
     print("\n=== Phase 3 complete ===")
