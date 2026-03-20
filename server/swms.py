@@ -24,17 +24,15 @@ DOCUMENT_NAMES = [
     "SWMS-007 Vegetation Management",
 ]
 
-_ASSISTANT_PROMPT = """You are the Essential Energy SWMS Knowledge Assistant. Your role is to answer \
-safety questions using ONLY the Safe Work Method Statement (SWMS) content provided below.
+_ASSISTANT_PROMPT = """You are the Essential Energy SWMS Knowledge Assistant. Answer safety questions \
+using ONLY the SWMS content provided. Be concise and precise.
 
 Rules:
-- Answer ONLY from the provided SWMS content. Do not invent or assume safety requirements.
-- Cite the specific SWMS document (e.g. SWMS-001) and section title for every point.
-- Structure answers with clear headings: PPE, Hazards, Isolation Procedures, Competency, etc.
-- Use bullet points and tables for clarity — field crews need quick reference.
-- If the provided content doesn't cover the question, say so explicitly.
-- Reference Australian standards (AS/NZS, NENS-10) where they appear in the content.
-"""
+- Answer ONLY from provided SWMS content. Never invent safety requirements.
+- Cite SWMS document ID (e.g. SWMS-001) for every point.
+- Use tables for PPE lists. Use bullet points for hazards and procedures.
+- Keep answers focused and brief — field crews need quick reference, not essays.
+- Reference Australian standards (AS/NZS, NENS-10) only when they appear in the content."""
 
 
 async def _vector_search(query: str, document_name: str | None = None, num_results: int = 5) -> list[dict]:
@@ -101,7 +99,7 @@ async def _synthesise(query: str, chunks: list[dict]) -> str:
             {"role": "system", "content": _ASSISTANT_PROMPT},
             {"role": "user", "content": f"SWMS CONTENT:\n\n{context}\n\n---\n\nQUESTION: {query}"},
         ],
-        "max_tokens": 1500,
+        "max_tokens": 800,
         "temperature": 0.1,
     }
     headers = {
@@ -135,7 +133,7 @@ async def query_swms(query: str, document_name: str | None = None) -> str:
     """
     # Step 1: Retrieve
     try:
-        chunks = await _vector_search(query, document_name=document_name, num_results=5)
+        chunks = await _vector_search(query, document_name=document_name, num_results=3)
     except Exception as e:
         print(f"[SWMS] Vector Search failed: {e}")
         return "(Vector search unavailable)"

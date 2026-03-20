@@ -56,18 +56,13 @@ resources:
             name: databricks-gte-large-en
             permission: CAN_QUERY
 
-        - name: lakebase-db
-          description: "Lakebase instance for conversation memory"
-          database:
-            name: ee-crew-briefing
-
   jobs:
     bom-weather-refresh:
       name: ee-crew-briefing-bom-refresh
       tasks:
         - task_key: refresh_bom
           notebook_task:
-            notebook_path: setup/03_bom_refresh
+            notebook_path: setup/03_bom_refresh.py
           existing_cluster_id: ""
           new_cluster:
             spark_version: "15.4.x-scala2.12"

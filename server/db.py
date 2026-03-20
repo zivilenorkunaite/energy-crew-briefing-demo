@@ -15,7 +15,25 @@ _LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE", "ee-crew-briefing")
 
 
 async def _get_database_token() -> Optional[str]:
-    """Get database credential token via /api/2.0/database/credentials."""
+    """Get database credential token. Tries PGPASSWORD, then SDK, then credentials API."""
+    # 1. PGPASSWORD env var (injected by database resource or set manually)
+    pg_password = os.environ.get("PGPASSWORD")
+    if pg_password:
+        return pg_password
+
+    # 2. Try Databricks SDK database credential generation
+    try:
+        from databricks.sdk import WorkspaceClient
+        w = WorkspaceClient()
+        cred = w.database.generate_database_credential(instance_names=[_LAKEBASE_INSTANCE])
+        token = getattr(cred, "token", None)
+        if token:
+            print(f"[DB] Got credential via SDK ({len(token)} chars)")
+            return token
+    except Exception as e:
+        print(f"[DB] SDK credential generation failed: {e}")
+
+    # 3. Try REST API
     try:
         workspace_token = get_oauth_token()
         if not workspace_token:
@@ -32,11 +50,11 @@ async def _get_database_token() -> Optional[str]:
                 token = data.get("token")
                 if token:
                     return token
-                print("[DB] Database credentials API returned no token, falling back to workspace token")
-                return workspace_token
     except Exception as e:
-        print(f"[DB] Failed to get database credential: {e}")
-        return get_oauth_token()
+        print(f"[DB] REST credentials API failed: {e}")
+
+    print("[DB] No database credential available")
+    return None
 
 
 class DatabasePool:
@@ -73,29 +91,35 @@ class DatabasePool:
             )
 
         if self._pool is None:
-            token = await _get_database_token()
-            if not token:
-                raise RuntimeError("Cannot connect to database: No credential token obtained.")
-
-            pg_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
+            pg_host = os.environ["PGHOST"]
             raw_port = os.environ.get("PGPORT", "5432")
             try:
                 pg_port = int(raw_port)
             except (ValueError, TypeError):
                 pg_port = 5432
+            pg_db = os.environ.get("PGDATABASE", "crew_briefing")
+
+            # Try database credentials API first
+            token = await _get_database_token()
+            pg_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
+
+            if token:
+                password = token
+            else:
+                raise RuntimeError("Cannot connect to database: No credential obtained.")
 
             self._pool = await asyncpg.create_pool(
-                host=os.environ["PGHOST"],
+                host=pg_host,
                 port=pg_port,
-                database=os.environ.get("PGDATABASE", "crew_briefing"),
+                database=pg_db,
                 user=pg_user,
-                password=token,
+                password=password,
                 ssl="require",
                 min_size=2,
                 max_size=10,
                 command_timeout=60,
             )
-            print(f"[DB] Connected to Lakebase at {os.environ['PGHOST']}")
+            print(f"[DB] Connected to Lakebase at {pg_host}")
 
         return self._pool
 
