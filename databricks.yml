@@ -1,0 +1,81 @@
+bundle:
+  name: ee-crew-briefing
+
+workspace:
+  host: https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com
+
+resources:
+  apps:
+    ee-crew-briefing:
+      name: ee-crew-briefing
+      description: "Field Operations Briefing Assistant — Genie + SWMS + Weather + Web Search"
+      source_code_path: ../ee-crew-briefing
+
+      config:
+        command:
+          - python
+          - -m
+          - uvicorn
+          - "app:app"
+          - --host
+          - "0.0.0.0"
+          - --port
+          - "8000"
+        env:
+          - name: SERVING_ENDPOINT
+            value: databricks-claude-sonnet-4-6
+          - name: TAVILY_API_KEY
+            value_from: tavily-api-key
+          - name: LAKEBASE_INSTANCE
+            value: ee-crew-briefing
+          - name: PGDATABASE
+            value: crew_briefing
+
+      resources:
+        - name: genie-room-field-ops
+          description: "Genie Room 2 — Field Operations"
+          genie:
+            space_id: 01f111b05416164989106b097e2f7d21
+            permission: CAN_RUN
+
+        - name: sql-warehouse
+          description: "SQL Warehouse for SWMS + Weather queries"
+          sql_warehouse:
+            id: c2abb17a6c9e6bc0
+            permission: CAN_USE
+
+        - name: serving-endpoint-gateway
+          description: "AI Gateway with Claude + Llama fallback"
+          serving_endpoint:
+            name: ee-crew-briefing-gateway
+            permission: CAN_QUERY
+
+        - name: serving-endpoint-embeddings
+          description: "GTE-Large embedding model for Vector Search"
+          serving_endpoint:
+            name: databricks-gte-large-en
+            permission: CAN_QUERY
+
+        - name: lakebase-db
+          description: "Lakebase instance for conversation memory"
+          database:
+            name: ee-crew-briefing
+
+  jobs:
+    bom-weather-refresh:
+      name: ee-crew-briefing-bom-refresh
+      tasks:
+        - task_key: refresh_bom
+          notebook_task:
+            notebook_path: setup/03_bom_refresh
+          existing_cluster_id: ""
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 0
+            spark_conf:
+              "spark.master": "local[*]"
+              "spark.databricks.cluster.profile": "singleNode"
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"
+        timezone_id: "Australia/Sydney"

@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+aiohttp
+databricks-sdk
+databricks-mcp
+tavily-python
+asyncpg
+mlflow
