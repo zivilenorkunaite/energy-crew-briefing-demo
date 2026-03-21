@@ -63,7 +63,7 @@ resources:
         - name: genie-field-ops
           description: "Genie Room — Field Operations (WACS data)"
           genie_space:
-            space_id: "01f111b05416164989106b097e2f7d21"
+            name: "01f111b05416164989106b097e2f7d21"
             permission: CAN_RUN
 
         - name: swms-v2
