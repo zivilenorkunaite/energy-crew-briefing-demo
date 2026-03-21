@@ -35,6 +35,7 @@ _cache_warm_task: Optional[asyncio.Task] = None
 _warm_history: list = []  # [{trigger, start, end, duration_s, before, after, skipped, errors, status, phase, done, total}]
 _warm_cancel = False
 MAX_WARM_HISTORY = 20
+_run_warm_ref = None  # set in _cache_warm_loop
 
 
 async def _refresh_loop():
@@ -72,7 +73,7 @@ async def _cache_warm_loop():
 
     async def _run_warm(trigger: str):
         """Run warming and record to history with live progress."""
-        global _warm_cancel
+        global _warm_cancel, _run_warm_ref
         _warm_cancel = False
         start = _time.time()
         now_str = datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST")
@@ -126,13 +127,12 @@ async def _cache_warm_loop():
 
     from server.settings import get_bool
 
-    # Initial warm on startup (after 30s delay)
-    await asyncio.sleep(30)
-    if await get_bool("warm_enabled", True):
-        print("[WARM] Initial cache warm on startup...")
-        await _run_warm("startup")
-    else:
-        print("[WARM] Scheduled warming disabled — skipping startup warm")
+    # Expose _run_warm for the manual API endpoint
+    global _run_warm_ref
+    _run_warm_ref = _run_warm
+
+    # No warm on startup — only on schedule (6am/6pm) or manual button
+    print("[WARM] Cache warm loop started — scheduled at 6am/6pm AEST, or trigger manually")
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
@@ -397,18 +397,13 @@ async def set_setting_endpoint(key: str, req: dict = {}):
 
 @app.post("/api/cache/warm")
 async def warm_cache_endpoint():
-    """Warm the cache — SSE stream of progress."""
-    from server.warm_cache import warm_cache
-
-    async def generate():
-        async for progress in warm_cache():
-            yield f"data: {json.dumps(progress)}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    """Trigger cache warming as a background task."""
+    # Check if already running
+    if _warm_history and _warm_history[0].get("status") == "running":
+        return {"ok": False, "error": "Warming already in progress"}
+    # Run _run_warm in background (it's defined inside _cache_warm_loop — call it via the shared reference)
+    asyncio.create_task(_run_warm_ref("manual"))
+    return {"ok": True}
 
 
 # ── Static files ──────────────────────────────────────────────────────────────

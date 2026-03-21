@@ -223,100 +223,94 @@
 
     loadStats();
 
-    // Warm cache — persists state to localStorage, supports cancel
-    let warming = false;
-    let warmController = null;
-
-    function updateWarmUI(state) {
+    // Warm cache — triggers server-side, monitors via history API
+    async function warmCache() {
       const link = document.getElementById('warmLink');
       const prog = document.getElementById('warmProgress');
-      const bar = document.getElementById('warmBar');
-      const text = document.getElementById('warmText');
-      const stop = document.getElementById('warmStop');
-
-      if (state && state.active) {
-        link.style.color = '#718096';
-        link.textContent = 'Warming cache...';
-        prog.style.display = 'block';
-        stop.style.display = 'inline';
-        const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
-        bar.style.width = pct + '%';
-        text.textContent = `${state.phase}: ${state.done}/${state.total} (${state.skipped} cached, ${state.errors} errors)`;
-      } else if (state && state.phase === 'done') {
-        link.textContent = 'Cache warmed';
-        link.style.color = '#276749';
-        stop.style.display = 'none';
-        setTimeout(() => { link.textContent = 'Pre-load cache for all locations and dates'; link.style.color = '#a0aec0'; prog.style.display = 'none'; bar.style.width = '0%'; }, 5000);
+      try {
+        const res = await fetch('/api/cache/warm', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          link.textContent = 'Warming cache...';
+          link.style.color = '#718096';
+          prog.style.display = 'block';
+          document.getElementById('warmText').textContent = 'Starting...';
+          document.getElementById('warmStop').style.display = 'inline';
+          // Poll progress via history
+          pollWarmProgress();
+        } else {
+          showStatus(data.error || 'Could not start warming', false);
+        }
+      } catch (e) {
+        showStatus('Error: ' + e.message, false);
       }
     }
 
-    // Restore state on page load
-    try {
-      const saved = JSON.parse(localStorage.getItem('warmState') || 'null');
-      if (saved && saved.active) updateWarmUI(saved);
-    } catch (e) {}
+    let warmPollTimer = null;
+    function pollWarmProgress() {
+      if (warmPollTimer) clearInterval(warmPollTimer);
+      warmPollTimer = setInterval(async () => {
+        try {
+          const res = await fetch('/api/cache/warm/history');
+          const data = await res.json();
+          const latest = (data.history || [])[0];
+          if (!latest) return;
 
-    async function warmCache() {
-      if (warming) return;
-      warming = true;
-      warmController = new AbortController();
+          const bar = document.getElementById('warmBar');
+          const text = document.getElementById('warmText');
+          const prog = document.getElementById('warmProgress');
+          const link = document.getElementById('warmLink');
+          const stop = document.getElementById('warmStop');
 
-      localStorage.setItem('warmState', JSON.stringify({ active: true, done: 0, total: 0, skipped: 0, errors: 0, phase: 'starting' }));
-      updateWarmUI({ active: true, done: 0, total: 0, skipped: 0, errors: 0, phase: 'starting' });
-
-      try {
-        const res = await fetch('/api/cache/warm', { method: 'POST', signal: warmController.signal });
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const d = JSON.parse(line.slice(6));
-              const state = { ...d, active: d.phase !== 'done' };
-              localStorage.setItem('warmState', JSON.stringify(state));
-              updateWarmUI(state);
-              if (d.phase === 'done') {
-                localStorage.removeItem('warmState');
-              }
-            } catch (e) {}
+          if (latest.status === 'running') {
+            const pct = latest.total > 0 ? Math.round(latest.done / latest.total * 100) : 0;
+            bar.style.width = pct + '%';
+            text.textContent = `${latest.phase}: ${latest.done}/${latest.total} (${latest.skipped} cached, ${latest.errors} errors)`;
+            prog.style.display = 'block';
+            stop.style.display = 'inline';
+          } else {
+            clearInterval(warmPollTimer); warmPollTimer = null;
+            stop.style.display = 'none';
+            if (latest.status === 'done') {
+              link.textContent = 'Cache warmed';
+              link.style.color = '#276749';
+              text.textContent = `Done: ${latest.before} → ${latest.after} in ${latest.duration_s}s`;
+            } else {
+              link.textContent = latest.status === 'cancelled' ? 'Warming cancelled' : 'Warming finished';
+              link.style.color = '#b45309';
+            }
+            setTimeout(() => { link.textContent = 'Pre-load cache for all locations and dates'; link.style.color = '#a0aec0'; prog.style.display = 'none'; bar.style.width = '0%'; }, 5000);
+            loadStats();
+            if (historyVisible) loadHistory();
           }
-        }
-      } catch (e) {
-        if (e.name === 'AbortError') {
-          document.getElementById('warmText').textContent = 'Stopped';
-        } else {
-          document.getElementById('warmText').textContent = 'Error: ' + e.message;
-        }
-        localStorage.removeItem('warmState');
-      }
-
-      warming = false;
-      warmController = null;
-      document.getElementById('warmStop').style.display = 'none';
-      loadStats();
+        } catch (e) {}
+      }, 3000);
     }
 
     function stopWarm() {
-      if (warmController) {
-        warmController.abort();
-        localStorage.removeItem('warmState');
-        setTimeout(() => {
-          document.getElementById('warmProgress').style.display = 'none';
-          document.getElementById('warmBar').style.width = '0%';
-          document.getElementById('warmLink').textContent = 'Pre-load cache for all locations and dates';
-          document.getElementById('warmLink').style.color = '#a0aec0';
-        }, 2000);
-      }
+      fetch('/api/cache/warm/stop', { method: 'POST' });
+      document.getElementById('warmStop').style.display = 'none';
+      document.getElementById('warmText').textContent = 'Stopping...';
+      if (warmPollTimer) { clearInterval(warmPollTimer); warmPollTimer = null; }
+      setTimeout(() => {
+        document.getElementById('warmProgress').style.display = 'none';
+        document.getElementById('warmLink').textContent = 'Pre-load cache for all locations and dates';
+        document.getElementById('warmLink').style.color = '#a0aec0';
+        loadStats();
+        if (historyVisible) loadHistory();
+      }, 3000);
     }
+
+    // Check if warming is running on page load
+    async function checkWarmRunning() {
+      try {
+        const res = await fetch('/api/cache/warm/history');
+        const data = await res.json();
+        const latest = (data.history || [])[0];
+        if (latest && latest.status === 'running') pollWarmProgress();
+      } catch (e) {}
+    }
+    checkWarmRunning();
     // Warm history
     let historyVisible = false;
     function toggleHistory() {
