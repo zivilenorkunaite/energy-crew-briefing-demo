@@ -6,8 +6,6 @@ env:
     value: 'crew-briefing-llm'
   - name: SUPERVISOR_MODEL
     value: 'crew-briefing-small-and-fast-llm'
-  - name: SUPERVISOR_GATEWAY_URL
-    value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/cursor/v1/chat/completions'
   - name: GENIE_SPACE_ID
     valueFrom: 'genie-field-ops'
   - name: SWMS_ENDPOINT

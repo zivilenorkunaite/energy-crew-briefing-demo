@@ -20,10 +20,7 @@ AI_GATEWAY_URL = os.environ.get(
     "AI_GATEWAY_URL",
     "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions",
 )
-SUPERVISOR_GATEWAY_URL = os.environ.get(
-    "SUPERVISOR_GATEWAY_URL",
-    "https://1313663707993479.ai-gateway.cloud.databricks.com/cursor/v1/chat/completions",
-)
+# Supervisor uses same AI_GATEWAY_URL with different model name
 # Model names — supervisor uses a fast gateway, writer uses the main gateway
 LLM_MODEL = os.environ.get("LLM_MODEL", "crew-briefing-llm")
 SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", "crew-briefing-small-and-fast-llm")
@@ -590,7 +587,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                     sv_response = await _call_llm(
                         _build_supervisor_prompt(),
                         supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                        model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL,
+                        model=SUPERVISOR_MODEL,
                     )
                     sv_span.set_outputs({
                         "finish_reason": sv_response.get("finish_reason"),
@@ -601,13 +598,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 sv_response = await _call_llm(
                     _build_supervisor_prompt(),
                     supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                    model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL,
+                    model=SUPERVISOR_MODEL,
                 )
         else:
             sv_response = await _call_llm(
                 _build_supervisor_prompt(),
                 supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL,
+                model=SUPERVISOR_MODEL,
             )
 
         tool_calls = sv_response.get("tool_calls", [])
