@@ -20,7 +20,7 @@ AI-powered assistant for Essential Energy field supervisors and crew leaders. Pr
 │                              │ tool calls (parallel)                  │
 │  ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌────────────────────┐    │
 │  │  Genie   │ │  SWMS    │ │  Weather  │ │  Web Search        │    │
-│  │  Room    │ │  v2 ep   │ │  UC func  │ │  (Tavily API)      │    │
+│  │  Room    │ │  v2 ep   │ │  UC func  │ │  (Tavily MCP)      │    │
 │  └────┬─────┘ └────┬─────┘ └─────┬─────┘ └─────────┬──────────┘    │
 │       │            │              │                  │               │
 │  ┌────┴────────────┴──────────────┴──────────────────┴───────────┐  │
@@ -44,7 +44,7 @@ AI-powered assistant for Essential Energy field supervisors and crew leaders. Pr
 | **Genie Room** | NL queries over WACS (work orders, crews, assets) | Genie Room `01f111b05416164989106b097e2f7d21` + SQL Warehouse | `server/genie.py` |
 | **SWMS v2** | Safety docs — loads full document from Delta, synthesises via AI Gateway | Serving endpoint `swms-knowledge-assistant-v2` (MLflow pyfunc) | `server/swms.py` |
 | **Weather** | Current + 14-day forecasts for 19 NSW depots | UC function `get_weather()` → `bom_weather` Delta table | `server/weather.py` |
-| **Web Search** | Road closures, events, disruptions near a location | Tavily API (key from secret scope) | `server/web_search.py` |
+| **Web Search** | Road closures, events, disruptions near a location | Tavily MCP server (`mcp.tavily.com`) | `server/web_search.py` |
 
 ## LLM Routing
 
