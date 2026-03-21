@@ -32,6 +32,8 @@ from server.agent import run_agent
 
 _token_refresh_task: Optional[asyncio.Task] = None
 _cache_warm_task: Optional[asyncio.Task] = None
+_warm_history: list = []  # [{trigger, start, end, duration_s, before, after, skipped, errors, status}]
+MAX_WARM_HISTORY = 20
 
 
 async def _refresh_loop():
@@ -65,16 +67,52 @@ async def _cache_warm_loop():
     EXPECTED_TOTAL = 466  # 7 + 209 + 19 + 231
 
     last_warm_hour = None
+    import time as _time
+
+    async def _run_warm(trigger: str):
+        """Run warming and record to history."""
+        start = _time.time()
+        now_str = datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST")
+
+        # Before stats
+        stats_before = await get_cache_stats()
+        before_total = sum(s.get("count", 0) for s in stats_before)
+
+        record = {"trigger": trigger, "start": now_str, "before": before_total, "status": "running"}
+        _warm_history.insert(0, record)
+        if len(_warm_history) > MAX_WARM_HISTORY:
+            _warm_history.pop()
+
+        last_progress = {}
+        try:
+            async for progress in warm_cache():
+                last_progress = progress
+                if progress.get("phase") == "done":
+                    print(f"[WARM] {trigger}: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
+        except Exception as e:
+            record["status"] = f"error: {e}"
+            print(f"[WARM] {trigger} error: {e}")
+            return
+
+        # After stats
+        stats_after = await get_cache_stats()
+        after_total = sum(s.get("count", 0) for s in stats_after)
+        elapsed = round(_time.time() - start, 1)
+
+        record.update({
+            "end": datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST"),
+            "duration_s": elapsed,
+            "after": after_total,
+            "skipped": last_progress.get("skipped", 0),
+            "errors": last_progress.get("errors", 0),
+            "status": "done",
+        })
+        print(f"[WARM] {trigger}: {before_total} → {after_total} in {elapsed}s")
 
     # Initial warm on startup (after 30s delay)
     await asyncio.sleep(30)
     print("[WARM] Initial cache warm on startup...")
-    try:
-        async for progress in warm_cache():
-            if progress.get("phase") == "done":
-                print(f"[WARM] Startup warm done: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
-    except Exception as e:
-        print(f"[WARM] Startup warm error: {e}")
+    await _run_warm("startup")
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
@@ -82,33 +120,26 @@ async def _cache_warm_loop():
             now = datetime.now(syd)
             current_hour = now.hour
 
-            # Check if it's a target hour and we haven't warmed this hour yet
             if current_hour in TARGET_HOURS and last_warm_hour != current_hour:
-                print(f"[WARM] Scheduled warm at {now.strftime('%H:%M')} AEST")
                 last_warm_hour = current_hour
 
-                # Check current cache level
                 stats = await get_cache_stats()
                 total = sum(s.get("count", 0) for s in stats)
                 pct = total / EXPECTED_TOTAL if EXPECTED_TOTAL > 0 else 0
 
                 if pct >= MIN_CACHE_PCT:
                     print(f"[WARM] Cache at {pct:.0%} ({total}/{EXPECTED_TOTAL}) — skipping")
+                    _warm_history.insert(0, {
+                        "trigger": f"scheduled {current_hour}:00",
+                        "start": now.strftime("%Y-%m-%d %H:%M AEST"),
+                        "status": f"skipped ({pct:.0%} full)",
+                        "before": total, "after": total, "duration_s": 0, "skipped": 0, "errors": 0,
+                    })
+                    if len(_warm_history) > MAX_WARM_HISTORY:
+                        _warm_history.pop()
                     continue
 
-                print(f"[WARM] Cache at {pct:.0%} ({total}/{EXPECTED_TOTAL}) — warming...")
-                async for progress in warm_cache():
-                    if progress.get("phase") == "done":
-                        print(f"[WARM] Done: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
-
-                # Verify
-                stats = await get_cache_stats()
-                total = sum(s.get("count", 0) for s in stats)
-                pct = total / EXPECTED_TOTAL
-                print(f"[WARM] Post-warm: {pct:.0%} ({total}/{EXPECTED_TOTAL})")
-
-                if pct < 0.5:
-                    print(f"[WARM] WARNING: Cache still low after warming — check tool health")
+                await _run_warm(f"scheduled {current_hour}:00")
 
         except Exception as e:
             print(f"[WARM] Loop error: {e}")
@@ -313,6 +344,11 @@ async def clear_cache_all():
         return {"ok": True, "cleared": count}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/cache/warm/history")
+async def warm_history():
+    return {"history": _warm_history}
 
 
 @app.post("/api/cache/warm")

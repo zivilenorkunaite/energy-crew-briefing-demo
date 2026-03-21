@@ -83,6 +83,17 @@
         </div>
       </div>
     </div>
+
+    <!-- Warm History (hidden by default) -->
+    <div style="text-align:center;padding:4px 0;">
+      <span id="historyToggle" onclick="toggleHistory()" style="color:#a0aec0;font-size:11px;cursor:pointer;user-select:none;">Show warm history</span>
+    </div>
+    <div id="historySection" style="display:none;">
+      <div class="card">
+        <h2>Cache Warm History</h2>
+        <div id="historyList"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -274,6 +285,54 @@
           document.getElementById('warmLink').style.color = '#a0aec0';
         }, 2000);
       }
+    }
+    // Warm history
+    let historyVisible = false;
+    function toggleHistory() {
+      historyVisible = !historyVisible;
+      document.getElementById('historySection').style.display = historyVisible ? 'block' : 'none';
+      document.getElementById('historyToggle').textContent = historyVisible ? 'Hide warm history' : 'Show warm history';
+      if (historyVisible) loadHistory();
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/cache/warm/history');
+        const data = await res.json();
+        renderHistory(data.history || []);
+      } catch (e) {
+        document.getElementById('historyList').innerHTML = '<div class="empty">Could not load history</div>';
+      }
+    }
+
+    function renderHistory(history) {
+      const el = document.getElementById('historyList');
+      if (!history.length) {
+        el.innerHTML = '<div class="empty">No warm runs yet</div>';
+        return;
+      }
+      let html = '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+      html += '<tr style="border-bottom:1px solid #e2e8f0;color:#718096;"><th style="text-align:left;padding:6px 4px;">Time</th><th>Trigger</th><th>Before</th><th>After</th><th>Duration</th><th>Status</th></tr>';
+      for (const r of history) {
+        const statusColor = r.status === 'done' ? '#276749' : r.status.startsWith('skip') ? '#718096' : r.status === 'running' ? '#2b6cb0' : '#c53030';
+        const dur = r.duration_s > 0 ? `${Math.round(r.duration_s)}s` : '—';
+        const before = r.before != null ? r.before : '—';
+        const after = r.after != null ? r.after : '—';
+        html += `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:5px 4px;white-space:nowrap;">${r.start || '—'}</td>
+          <td style="padding:5px 4px;text-align:center;">${r.trigger || '—'}</td>
+          <td style="padding:5px 4px;text-align:center;">${before}</td>
+          <td style="padding:5px 4px;text-align:center;">${after}</td>
+          <td style="padding:5px 4px;text-align:center;">${dur}</td>
+          <td style="padding:5px 4px;text-align:center;color:${statusColor};font-weight:500;">${r.status || '—'}</td>
+        </tr>`;
+      }
+      html += '</table>';
+      if (history.some(r => r.errors > 0)) {
+        const errRuns = history.filter(r => r.errors > 0);
+        html += `<div style="margin-top:8px;font-size:11px;color:#c53030;">${errRuns.length} run(s) had errors</div>`;
+      }
+      el.innerHTML = html;
     }
   </script>
 </body>
