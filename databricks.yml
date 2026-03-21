@@ -140,5 +140,5 @@ resources:
             notebook_path: setup/10_warm_cache.py
           environment_key: Default
       schedule:
-        quartz_cron_expression: "0 0 */12 * * ?"
+        quartz_cron_expression: "0 0 6,18 * * ?"
         timezone_id: "Australia/Sydney"
