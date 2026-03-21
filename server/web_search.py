@@ -91,6 +91,7 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
     client = _get_client()
     loc, council_domain, lga = _resolve_location(location)
     town = loc.replace(" NSW", "")
+    town_nsw = f"{town} NSW"
 
     # Build targeted queries with Australian context
     searches = []
@@ -99,13 +100,13 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
         # Query 1: Council-specific road works (use include_domains if we know the council)
         council_domains = [council_domain] if council_domain else []
         searches.append({
-            "query": f"road closure road works {town}",
+            "query": f"road closure road works {town_nsw}",
             "domains": council_domains,
             "topic": "general",
         })
         # Query 2: Live Traffic NSW + Transport NSW for the area
         searches.append({
-            "query": f"site:livetraffic.com OR site:transport.nsw.gov.au {town} road closure",
+            "query": f"site:livetraffic.com OR site:transport.nsw.gov.au {town_nsw} road closure",
             "domains": ["livetraffic.com", "transport.nsw.gov.au"],
             "topic": "general",
         })
@@ -115,7 +116,7 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
         event_domains = [council_domain] if council_domain else []
         event_domains.append("eventbrite.com.au")
         searches.append({
-            "query": f"{town} NSW community event festival market fair 2026",
+            "query": f"{town_nsw} community event festival market fair 2026",
             "domains": event_domains,
             "topic": "general",
         })
@@ -123,7 +124,7 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
     if search_type == "all":
         # Query 4: Planned outages from Essential Energy + emergency services
         searches.append({
-            "query": f"{town} NSW planned outage power disruption Essential Energy",
+            "query": f"{town_nsw} planned outage power disruption Essential Energy",
             "domains": ["essentialenergy.com.au"],
             "topic": "general",
         })
