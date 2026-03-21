@@ -22,5 +22,9 @@ env:
     value: 'projects/ee-crew-briefing-as/branches/production/endpoints/primary'
   - name: MLFLOW_TRACING_DESTINATION
     value: 'zivile.essential_energy_wacs'
+  - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
+    value: 'c2abb17a6c9e6bc0'
   - name: MLFLOW_EXPERIMENT
     value: '/Shared/ee-crew-briefing-traces-uc'
+  - name: AGENT_VERSION
+    value: 'v3'

@@ -30,6 +30,9 @@ MLFLOW_EXPERIMENT = os.environ.get(
     "/Shared/ee-crew-briefing-traces-uc",
 )
 
+# Agent version — bump when changing agent logic, prompts, or tool config
+AGENT_VERSION = os.environ.get("AGENT_VERSION", "v3")
+
 _mlflow_ready = False
 mlflow = None
 try:
@@ -37,9 +40,19 @@ try:
     _mlflow.set_tracking_uri("databricks")
     _mlflow.set_registry_uri("databricks-uc")
     _mlflow.set_experiment(MLFLOW_EXPERIMENT)
+
+    # Register this agent version — traces are automatically linked
+    _mlflow.set_active_model(name=f"crew-briefing-agent-{AGENT_VERSION}")
+    _mlflow.log_model_params({
+        "agent_version": AGENT_VERSION,
+        "supervisor_model": SUPERVISOR_MODEL,
+        "writer_model": LLM_MODEL,
+        "ai_gateway_url": AI_GATEWAY_URL,
+    })
+
     mlflow = _mlflow
     _mlflow_ready = True
-    print(f"[AGENT] MLflow tracing enabled — experiment: {MLFLOW_EXPERIMENT}")
+    print(f"[AGENT] MLflow tracing enabled — experiment: {MLFLOW_EXPERIMENT}, agent: {AGENT_VERSION}")
 except Exception as e:
     print(f"[AGENT] MLflow not available, tracing disabled: {e}")
 
