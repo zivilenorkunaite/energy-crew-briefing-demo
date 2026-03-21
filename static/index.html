@@ -372,6 +372,11 @@
         <span class="xray-toggle-label">X-Ray Mode</span>
         <div class="xray-switch"></div>
       </div>
+      <div class="xray-toggle" id="streamToggle" onclick="toggleStream()">
+        <span style="font-size:13px">&#x26A1;</span>
+        <span class="xray-toggle-label">Stream Response</span>
+        <div class="xray-switch"></div>
+      </div>
     </nav>
 
     <!-- ── Chat wrap ── -->
@@ -421,6 +426,7 @@
     let busy = false;
     let serverSessions = true;  // assume server sessions available
     let xrayMode = localStorage.getItem('xrayMode') === 'true';
+    let streamMode = localStorage.getItem('streamMode') !== 'false'; // default ON
     let collectedSteps = [];    // steps collected during agent run
 
     // ── X-Ray toggle ──
@@ -430,10 +436,19 @@
       document.getElementById('xrayToggle').classList.toggle('active', xrayMode);
       document.body.classList.toggle('xray-on', xrayMode);
     }
-    // Init x-ray state
+    // ── Stream toggle ──
+    function toggleStream() {
+      streamMode = !streamMode;
+      localStorage.setItem('streamMode', streamMode);
+      document.getElementById('streamToggle').classList.toggle('active', streamMode);
+    }
+    // Init toggle states
     if (xrayMode) {
       document.getElementById('xrayToggle')?.classList.add('active');
       document.body.classList.add('xray-on');
+    }
+    if (streamMode) {
+      document.getElementById('streamToggle')?.classList.add('active');
     }
 
     function buildStepsHtml(steps) {
@@ -844,6 +859,7 @@
                 addLiveStep(step);
               } else if (eventType === 'token') {
                 const tokenText = JSON.parse(data);
+                if (!streamMode) continue; // skip token rendering when streaming disabled
                 // First token — swap thinking for streaming bubble
                 if (!document.getElementById('streaming-bubble')) {
                   removeThinking();
