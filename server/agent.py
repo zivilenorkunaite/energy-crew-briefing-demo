@@ -44,24 +44,52 @@ except Exception as e:
     print(f"[AGENT] MLflow not available, tracing disabled: {e}")
 
 
-# ── System Prompts (loaded from prompts.yaml) ─────────────────────────────
+# ── System Prompts (loaded from MLflow Prompt Registry) ────────────────────
 
-import yaml as _yaml
-from pathlib import Path as _Path
+_UC_SCHEMA = "zivile.essential_energy_wacs"
+_PROMPT_ALIAS = os.environ.get("PROMPT_ALIAS", "production")
 
-def _load_prompts() -> dict:
-    """Load prompt templates from prompts.yaml."""
-    prompts_path = _Path(__file__).parent / "prompts.yaml"
+_supervisor_prompt_template = None
+_writer_prompt_template = None
+_PROMPT_VERSION = "unknown"
+
+def _load_prompts_from_registry():
+    """Load prompt templates from MLflow Prompt Registry (UC)."""
+    global _supervisor_prompt_template, _writer_prompt_template, _PROMPT_VERSION
+    if not _mlflow_ready:
+        return
+    try:
+        sv = mlflow.genai.load_prompt(f"prompts:/{_UC_SCHEMA}.crew_briefing_supervisor@{_PROMPT_ALIAS}")
+        wr = mlflow.genai.load_prompt(f"prompts:/{_UC_SCHEMA}.crew_briefing_writer@{_PROMPT_ALIAS}")
+        _supervisor_prompt_template = sv.template
+        _writer_prompt_template = wr.template
+        _PROMPT_VERSION = f"sv-v{sv.version}_wr-v{wr.version}"
+        print(f"[AGENT] Loaded prompts from registry: supervisor v{sv.version}, writer v{wr.version} (@{_PROMPT_ALIAS})")
+    except Exception as e:
+        import traceback
+        print(f"[AGENT] Prompt Registry load failed: {e}")
+        traceback.print_exc()
+        print("[AGENT] Falling back to YAML...")
+        _load_prompts_from_yaml()
+
+def _load_prompts_from_yaml():
+    """Fallback: load from prompts.yaml."""
+    global _supervisor_prompt_template, _writer_prompt_template, _PROMPT_VERSION
+    from pathlib import Path
+    import yaml
+    prompts_path = Path(__file__).parent / "prompts.yaml"
     if prompts_path.exists():
         with open(prompts_path) as f:
-            data = _yaml.safe_load(f)
-        print(f"[AGENT] Loaded prompts v{data.get('version', '?')} from {prompts_path}")
-        return data
-    print("[AGENT] prompts.yaml not found, using defaults")
-    return {}
+            data = yaml.safe_load(f)
+        _supervisor_prompt_template = data.get("supervisor", {}).get("template")
+        _writer_prompt_template = data.get("writer", {}).get("template")
+        _PROMPT_VERSION = f"yaml-v{data.get('version', '?')}"
+        print(f"[AGENT] Loaded prompts from YAML v{data.get('version', '?')}")
+    else:
+        print("[AGENT] No prompts found — using minimal defaults")
 
-_PROMPTS = _load_prompts()
-_PROMPT_VERSION = _PROMPTS.get("version", "unknown")
+# Load at startup
+_load_prompts_from_registry()
 
 
 def _get_sydney_time() -> tuple[str, str]:
@@ -87,17 +115,17 @@ _CREW_LIST = (
 
 
 def _build_supervisor_prompt() -> str:
-    """Build supervisor prompt from template."""
+    """Build supervisor prompt from loaded template."""
     date_str, time_str = _get_sydney_time()
-    template = _PROMPTS.get("supervisor", {}).get("template", "You are a tool-routing supervisor.")
-    return template.format(date_str=date_str, time_str=time_str, crew_list=_CREW_LIST)
+    template = _supervisor_prompt_template or "You are a tool-routing supervisor."
+    return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).replace("{{crew_list}}", _CREW_LIST).format(date_str=date_str, time_str=time_str, crew_list=_CREW_LIST)
 
 
 def _build_writer_prompt() -> str:
-    """Build writer prompt from template."""
+    """Build writer prompt from loaded template."""
     date_str, time_str = _get_sydney_time()
-    template = _PROMPTS.get("writer", {}).get("template", "You are a field operations assistant.")
-    return template.format(date_str=date_str, time_str=time_str)
+    template = _writer_prompt_template or "You are a field operations assistant."
+    return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).format(date_str=date_str, time_str=time_str)
 
 
 TOOLS = [
