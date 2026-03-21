@@ -83,10 +83,11 @@ for t, c in per_tool.items():
     print(f"  {t}: {c}")
 
 if total == 0 and not per_tool:
-    # Debug: show raw response
     debug_resp = requests.get(f"{APP_URL}/api/cache/stats", headers=HEADERS, timeout=10)
     print(f"Stats response: {debug_resp.status_code} — {debug_resp.text[:500]}")
-    raise Exception(f"Cannot read cache stats — got status {debug_resp.status_code}: {debug_resp.text[:200]}")
+    if debug_resp.status_code != 200:
+        raise Exception(f"Cannot reach cache stats API — status {debug_resp.status_code}: {debug_resp.text[:200]}")
+    print("Cache is empty — warming will populate it")
 
 # COMMAND ----------
 
