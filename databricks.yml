@@ -39,13 +39,17 @@ resources:
           - name: AI_GATEWAY_URL
             value: "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions"
           - name: LLM_MODEL
-            value: databricks-claude-sonnet-4-6
+            value: crew-briefing-llm
           - name: SUPERVISOR_MODEL
-            value: databricks-gemini-2-5-flash
+            value: crew-briefing-small-and-fast-llm
+          - name: SUPERVISOR_GATEWAY_URL
+            value: "https://1313663707993479.ai-gateway.cloud.databricks.com/cursor/v1/chat/completions"
           - name: SWMS_ENDPOINT
             value: swms-knowledge-assistant-v2
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
+          - name: GENIE_SPACE_ID
+            value_from: genie-field-ops
           - name: PGHOST
             value: ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com
           - name: PGDATABASE
@@ -56,8 +60,14 @@ resources:
             value: require
           - name: ENDPOINT_NAME
             value: projects/ee-crew-briefing-as/branches/production/endpoints/primary
-          - name: GENIE_SPACE_ID
-            value_from: genie-field-ops
+          - name: MLFLOW_TRACING_DESTINATION
+            value: zivile.essential_energy_wacs
+          - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
+            value_from: sql-warehouse
+          - name: MLFLOW_EXPERIMENT
+            value: /Shared/ee-crew-briefing-traces-uc
+          - name: AGENT_VERSION
+            value: v4
 
       resources:
         - name: genie-field-ops
