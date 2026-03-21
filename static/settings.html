@@ -66,7 +66,9 @@
       <p style="font-size:13px;color:#718096;margin-bottom:12px;">Cached tool results are stored in Lakebase to speed up repeated queries.</p>
       <div id="cacheList"><div class="empty">Loading cache stats...</div></div>
       <div id="status"></div>
-      <button class="btn btn-all" onclick="clearAll()">Clear All Cache</button>
+      <div id="clearAllWrap">
+        <button class="btn btn-all" onclick="confirmClearAll()">Clear All Cache</button>
+      </div>
     </div>
 
     <div style="text-align:center;padding:16px 0;">
@@ -154,8 +156,19 @@
       }
     }
 
+    function confirmClearAll() {
+      const wrap = document.getElementById('clearAllWrap');
+      wrap.innerHTML = `
+        <span style="font-size:13px;color:#e53e3e;font-weight:500;">Delete all cached results?</span>
+        <button class="btn btn-all" onclick="clearAll()" style="margin-left:8px;">Yes, clear all</button>
+        <button class="btn" onclick="cancelClearAll()" style="margin-left:4px;color:#718096;">Cancel</button>
+      `;
+    }
+    function cancelClearAll() {
+      document.getElementById('clearAllWrap').innerHTML = '<button class="btn btn-all" onclick="confirmClearAll()">Clear All Cache</button>';
+    }
     async function clearAll() {
-      if (!confirm('Clear all cached tool results?')) return;
+      document.getElementById('clearAllWrap').innerHTML = '<button class="btn btn-all" onclick="confirmClearAll()">Clear All Cache</button>';
       try {
         const res = await fetch('/api/cache', { method: 'DELETE' });
         const data = await res.json();
