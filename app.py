@@ -252,12 +252,14 @@ if static_dir.exists():
     async def catch_all(path: str):
         if path.startswith("api/"):
             return JSONResponse(status_code=404, content={"error": "Not found"})
-        file_path = static_dir / path
+        file_path = (static_dir / path).resolve()
+        if not str(file_path).startswith(str(static_dir.resolve())):
+            return JSONResponse(status_code=403, content={"error": "Forbidden"})
         if file_path.is_file():
             return FileResponse(str(file_path))
         # Try with .html extension (e.g. /settings → settings.html)
-        html_path = static_dir / f"{path}.html"
-        if html_path.is_file():
+        html_path = (static_dir / f"{path}.html").resolve()
+        if str(html_path).startswith(str(static_dir.resolve())) and html_path.is_file():
             return FileResponse(str(html_path))
         return FileResponse(str(static_dir / "index.html"))
 else:
