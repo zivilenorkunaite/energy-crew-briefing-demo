@@ -4,12 +4,13 @@ The UC function `zivile.essential_energy_wacs.get_weather(location, forecast_dat
 the `bom_weather` Delta table (refreshed hourly). API fallback if data is missing or stale.
 """
 
+import os
 import aiohttp
 from datetime import datetime, timedelta
 
 from server.config import get_oauth_token, get_workspace_host
 
-WAREHOUSE_ID = "c2abb17a6c9e6bc0"
+WAREHOUSE_ID = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "c2abb17a6c9e6bc0")
 UC_FUNCTION = "zivile.essential_energy_wacs.get_weather"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 

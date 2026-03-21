@@ -35,7 +35,7 @@ MLFLOW_EXPERIMENT = os.environ.get(
 )
 
 # Agent version — bump when changing agent logic, prompts, or tool config
-AGENT_VERSION = os.environ.get("AGENT_VERSION", "v3")
+AGENT_VERSION = os.environ.get("AGENT_VERSION", "v4")
 
 _mlflow_ready = False
 mlflow = None
