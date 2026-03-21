@@ -58,6 +58,13 @@
         </div>
         <div class="toggle" id="streamToggle" onclick="toggleStream()"></div>
       </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Scheduled cache warming</div>
+          <div class="setting-desc">Automatically pre-load cache at 6am and 6pm AEST + on app startup</div>
+        </div>
+        <div class="toggle active" id="warmEnabledToggle" onclick="toggleWarmEnabled()"></div>
+      </div>
     </div>
 
     <!-- Cache Settings -->
@@ -113,6 +120,31 @@
       localStorage.setItem('streamMode', streamMode);
       document.getElementById('streamToggle').classList.toggle('active', streamMode);
     }
+
+    // Warm enabled toggle (server-side state)
+    async function loadWarmEnabled() {
+      try {
+        const res = await fetch('/api/cache/warm/enabled');
+        const data = await res.json();
+        document.getElementById('warmEnabledToggle').classList.toggle('active', data.enabled);
+      } catch (e) {}
+    }
+    async function toggleWarmEnabled() {
+      const toggle = document.getElementById('warmEnabledToggle');
+      const newVal = !toggle.classList.contains('active');
+      toggle.classList.toggle('active', newVal);
+      try {
+        await fetch('/api/cache/warm/enabled', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: newVal }),
+        });
+        showStatus(newVal ? 'Scheduled warming enabled' : 'Scheduled warming disabled', true);
+      } catch (e) {
+        showStatus('Error updating', false);
+      }
+    }
+    loadWarmEnabled();
 
     // Cache management
     async function loadStats() {
@@ -305,34 +337,68 @@
       }
     }
 
+    let historyTimer = null;
+
     function renderHistory(history) {
       const el = document.getElementById('historyList');
       if (!history.length) {
         el.innerHTML = '<div class="empty">No warm runs yet</div>';
         return;
       }
+      const hasRunning = history.some(r => r.status === 'running');
       let html = '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-      html += '<tr style="border-bottom:1px solid #e2e8f0;color:#718096;"><th style="text-align:left;padding:6px 4px;">Time</th><th>Trigger</th><th>Before</th><th>After</th><th>Duration</th><th>Status</th></tr>';
+      html += '<tr style="border-bottom:1px solid #e2e8f0;color:#718096;"><th style="text-align:left;padding:6px 4px;">Time</th><th>Trigger</th><th>Progress</th><th>Before</th><th>After</th><th>Duration</th><th>Status</th></tr>';
       for (const r of history) {
-        const statusColor = r.status === 'done' ? '#276749' : r.status.startsWith('skip') ? '#718096' : r.status === 'running' ? '#2b6cb0' : '#c53030';
+        const isRunning = r.status === 'running';
+        const statusColor = r.status === 'done' ? '#276749' : r.status.startsWith('skip') ? '#718096' : isRunning ? '#2b6cb0' : r.status === 'cancelled' ? '#b45309' : '#c53030';
         const dur = r.duration_s > 0 ? `${Math.round(r.duration_s)}s` : '—';
         const before = r.before != null ? r.before : '—';
         const after = r.after != null ? r.after : '—';
-        html += `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:5px 4px;white-space:nowrap;">${r.start || '—'}</td>
-          <td style="padding:5px 4px;text-align:center;">${r.trigger || '—'}</td>
-          <td style="padding:5px 4px;text-align:center;">${before}</td>
-          <td style="padding:5px 4px;text-align:center;">${after}</td>
-          <td style="padding:5px 4px;text-align:center;">${dur}</td>
-          <td style="padding:5px 4px;text-align:center;color:${statusColor};font-weight:500;">${r.status || '—'}</td>
-        </tr>`;
+
+        let progress = '—';
+        if (isRunning && r.total > 0) {
+          const pct = Math.round(r.done / r.total * 100);
+          progress = '<div style="display:flex;align-items:center;gap:4px;">' +
+            '<div style="background:#e2e8f0;border-radius:3px;height:4px;width:60px;overflow:hidden;">' +
+            '<div style="background:#2b6cb0;height:100%;width:' + pct + '%;border-radius:3px;"></div></div>' +
+            '<span>' + r.done + '/' + r.total + ' (' + r.phase + ')</span></div>';
+        } else if (r.total > 0) {
+          progress = r.done + '/' + r.total;
+        }
+
+        let statusHtml = `<span style="color:${statusColor};font-weight:500;">${r.status}</span>`;
+        if (isRunning) {
+          statusHtml += ` <span onclick="stopBackgroundWarm()" style="color:#e53e3e;cursor:pointer;font-size:10px;text-decoration:underline;">stop</span>`;
+        }
+
+        html += '<tr style="border-bottom:1px solid #f0f0f0;">' +
+          '<td style="padding:5px 4px;white-space:nowrap;">' + (r.start || '—') + '</td>' +
+          '<td style="padding:5px 4px;text-align:center;">' + (r.trigger || '—') + '</td>' +
+          '<td style="padding:5px 4px;">' + progress + '</td>' +
+          '<td style="padding:5px 4px;text-align:center;">' + before + '</td>' +
+          '<td style="padding:5px 4px;text-align:center;">' + after + '</td>' +
+          '<td style="padding:5px 4px;text-align:center;">' + dur + '</td>' +
+          '<td style="padding:5px 4px;text-align:center;">' + statusHtml + '</td></tr>';
       }
       html += '</table>';
-      if (history.some(r => r.errors > 0)) {
-        const errRuns = history.filter(r => r.errors > 0);
-        html += `<div style="margin-top:8px;font-size:11px;color:#c53030;">${errRuns.length} run(s) had errors</div>`;
-      }
       el.innerHTML = html;
+
+      // Auto-refresh while running
+      if (hasRunning && historyVisible) {
+        if (!historyTimer) historyTimer = setInterval(loadHistory, 3000);
+      } else {
+        if (historyTimer) { clearInterval(historyTimer); historyTimer = null; }
+      }
+    }
+
+    async function stopBackgroundWarm() {
+      try {
+        await fetch('/api/cache/warm/stop', { method: 'POST' });
+        showStatus('Warm cancelled', true);
+        setTimeout(loadHistory, 2000);
+      } catch (e) {
+        showStatus('Error stopping', false);
+      }
     }
   </script>
 </body>

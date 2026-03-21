@@ -32,7 +32,9 @@ from server.agent import run_agent
 
 _token_refresh_task: Optional[asyncio.Task] = None
 _cache_warm_task: Optional[asyncio.Task] = None
-_warm_history: list = []  # [{trigger, start, end, duration_s, before, after, skipped, errors, status}]
+_warm_history: list = []  # [{trigger, start, end, duration_s, before, after, skipped, errors, status, phase, done, total}]
+_warm_cancel = False
+_warm_enabled = True  # toggle via /api/cache/warm/enabled
 MAX_WARM_HISTORY = 20
 
 
@@ -70,31 +72,46 @@ async def _cache_warm_loop():
     import time as _time
 
     async def _run_warm(trigger: str):
-        """Run warming and record to history."""
+        """Run warming and record to history with live progress."""
+        nonlocal _warm_cancel
+        _warm_cancel = False
         start = _time.time()
         now_str = datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST")
 
-        # Before stats
         stats_before = await get_cache_stats()
         before_total = sum(s.get("count", 0) for s in stats_before)
 
-        record = {"trigger": trigger, "start": now_str, "before": before_total, "status": "running"}
+        record = {
+            "trigger": trigger, "start": now_str, "before": before_total,
+            "status": "running", "phase": "starting", "done": 0, "total": 0,
+            "skipped": 0, "errors": 0, "after": None, "duration_s": None, "end": None,
+        }
         _warm_history.insert(0, record)
         if len(_warm_history) > MAX_WARM_HISTORY:
             _warm_history.pop()
 
-        last_progress = {}
         try:
             async for progress in warm_cache():
-                last_progress = progress
+                # Update live progress in the record
+                record["phase"] = progress.get("phase", "")
+                record["done"] = progress.get("done", 0)
+                record["total"] = progress.get("total", 0)
+                record["skipped"] = progress.get("skipped", 0)
+                record["errors"] = progress.get("errors", 0)
+                record["duration_s"] = round(_time.time() - start, 1)
+
                 if progress.get("phase") == "done":
                     print(f"[WARM] {trigger}: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
+
+                if _warm_cancel:
+                    print(f"[WARM] {trigger}: cancelled by user")
+                    record["status"] = "cancelled"
+                    break
         except Exception as e:
             record["status"] = f"error: {e}"
             print(f"[WARM] {trigger} error: {e}")
             return
 
-        # After stats
         stats_after = await get_cache_stats()
         after_total = sum(s.get("count", 0) for s in stats_after)
         elapsed = round(_time.time() - start, 1)
@@ -103,20 +120,25 @@ async def _cache_warm_loop():
             "end": datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST"),
             "duration_s": elapsed,
             "after": after_total,
-            "skipped": last_progress.get("skipped", 0),
-            "errors": last_progress.get("errors", 0),
-            "status": "done",
         })
+        if record["status"] == "running":
+            record["status"] = "done"
         print(f"[WARM] {trigger}: {before_total} → {after_total} in {elapsed}s")
 
     # Initial warm on startup (after 30s delay)
     await asyncio.sleep(30)
-    print("[WARM] Initial cache warm on startup...")
-    await _run_warm("startup")
+    if _warm_enabled:
+        print("[WARM] Initial cache warm on startup...")
+        await _run_warm("startup")
+    else:
+        print("[WARM] Scheduled warming disabled — skipping startup warm")
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
         try:
+            if not _warm_enabled:
+                continue
+
             now = datetime.now(syd)
             current_hour = now.hour
 
@@ -349,6 +371,25 @@ async def clear_cache_all():
 @app.get("/api/cache/warm/history")
 async def warm_history():
     return {"history": _warm_history}
+
+
+@app.post("/api/cache/warm/stop")
+async def warm_stop():
+    global _warm_cancel
+    _warm_cancel = True
+    return {"ok": True}
+
+
+@app.get("/api/cache/warm/enabled")
+async def warm_enabled_get():
+    return {"enabled": _warm_enabled}
+
+
+@app.post("/api/cache/warm/enabled")
+async def warm_enabled_set(req: dict = {}):
+    global _warm_enabled
+    _warm_enabled = bool(req.get("enabled", True))
+    return {"enabled": _warm_enabled}
 
 
 @app.post("/api/cache/warm")
