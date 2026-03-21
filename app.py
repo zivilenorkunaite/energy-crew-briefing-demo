@@ -28,9 +28,10 @@ from starlette.responses import StreamingResponse
 from server.agent import run_agent
 
 
-# ── Lakebase lifecycle ──────────────────────────────────────────────────────
+# ── Background tasks ──────────────────────────────────────────────────────
 
 _token_refresh_task: Optional[asyncio.Task] = None
+_cache_warm_task: Optional[asyncio.Task] = None
 
 
 async def _refresh_loop():
@@ -45,15 +46,84 @@ async def _refresh_loop():
             print(f"[APP] Token refresh failed: {e}")
 
 
+async def _cache_warm_loop():
+    """Run cache warming at 6am and 6pm Sydney time."""
+    from server.warm_cache import warm_cache
+    from server.cache import get_cache_stats
+    try:
+        from zoneinfo import ZoneInfo
+        syd = ZoneInfo("Australia/Sydney")
+    except Exception:
+        from datetime import timezone, timedelta
+        syd = timezone(timedelta(hours=11))
+
+    from datetime import datetime
+
+    TARGET_HOURS = {6, 18}
+    CHECK_INTERVAL = 300  # check every 5 min
+    MIN_CACHE_PCT = 0.80
+    EXPECTED_TOTAL = 466  # 7 + 209 + 19 + 231
+
+    last_warm_hour = None
+
+    # Initial warm on startup (after 30s delay)
+    await asyncio.sleep(30)
+    print("[WARM] Initial cache warm on startup...")
+    try:
+        async for progress in warm_cache():
+            if progress.get("phase") == "done":
+                print(f"[WARM] Startup warm done: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
+    except Exception as e:
+        print(f"[WARM] Startup warm error: {e}")
+
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL)
+        try:
+            now = datetime.now(syd)
+            current_hour = now.hour
+
+            # Check if it's a target hour and we haven't warmed this hour yet
+            if current_hour in TARGET_HOURS and last_warm_hour != current_hour:
+                print(f"[WARM] Scheduled warm at {now.strftime('%H:%M')} AEST")
+                last_warm_hour = current_hour
+
+                # Check current cache level
+                stats = await get_cache_stats()
+                total = sum(s.get("count", 0) for s in stats)
+                pct = total / EXPECTED_TOTAL if EXPECTED_TOTAL > 0 else 0
+
+                if pct >= MIN_CACHE_PCT:
+                    print(f"[WARM] Cache at {pct:.0%} ({total}/{EXPECTED_TOTAL}) — skipping")
+                    continue
+
+                print(f"[WARM] Cache at {pct:.0%} ({total}/{EXPECTED_TOTAL}) — warming...")
+                async for progress in warm_cache():
+                    if progress.get("phase") == "done":
+                        print(f"[WARM] Done: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
+
+                # Verify
+                stats = await get_cache_stats()
+                total = sum(s.get("count", 0) for s in stats)
+                pct = total / EXPECTED_TOTAL
+                print(f"[WARM] Post-warm: {pct:.0%} ({total}/{EXPECTED_TOTAL})")
+
+                if pct < 0.5:
+                    print(f"[WARM] WARNING: Cache still low after warming — check tool health")
+
+        except Exception as e:
+            print(f"[WARM] Loop error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Init DB pool on startup, refresh token periodically, close on shutdown."""
-    global _token_refresh_task
+    """Init DB pool, start background tasks, clean up on shutdown."""
+    global _token_refresh_task, _cache_warm_task
     try:
         from server.db import db
         await db.get_pool()
         _token_refresh_task = asyncio.create_task(_refresh_loop())
-        print("[APP] Lakebase connected, token refresh scheduled")
+        _cache_warm_task = asyncio.create_task(_cache_warm_loop())
+        print("[APP] Lakebase connected, token refresh + cache warm scheduled")
     except Exception as e:
         print(f"[APP] Lakebase init failed (sessions will not persist): {e}")
 
@@ -61,6 +131,8 @@ async def lifespan(app: FastAPI):
 
     if _token_refresh_task:
         _token_refresh_task.cancel()
+    if _cache_warm_task:
+        _cache_warm_task.cancel()
     try:
         from server.db import db
         await db.close()

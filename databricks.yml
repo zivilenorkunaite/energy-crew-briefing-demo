@@ -126,21 +126,4 @@ resources:
         quartz_cron_expression: "0 0 * * * ?"
         timezone_id: "Australia/Sydney"
 
-    cache-warm:
-      name: ee-crew-briefing-cache-warm
-      run_as:
-        service_principal_name: "84fba77d-2b5d-40ef-94e4-a0c81b5af427"
-      tags:
-        demo: crew_briefing
-      environments:
-        - environment_key: Default
-          spec:
-            client: "1"
-      tasks:
-        - task_key: warm_cache
-          notebook_task:
-            notebook_path: setup/10_warm_cache.py
-          environment_key: Default
-      schedule:
-        quartz_cron_expression: "0 0 6,18 * * ?"
-        timezone_id: "Australia/Sydney"
+    # Cache warming runs in-app (app.py background task at 6am/6pm AEST)
