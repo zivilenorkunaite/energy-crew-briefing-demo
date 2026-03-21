@@ -3,6 +3,6 @@ uvicorn
 aiohttp
 databricks-sdk
 databricks-mcp
-tavily-python
+mcp
 asyncpg
 mlflow

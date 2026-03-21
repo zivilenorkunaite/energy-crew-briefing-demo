@@ -1,11 +1,18 @@
 """Web search tool — searches for local council notices, community events, and road closures
 that may affect field crew operations in NSW, Australia.
 
-Uses Tavily search API for near-real-time web results."""
+Uses Tavily MCP server for near-real-time web results."""
 
 import os
-from tavily import AsyncTavilyClient
-from databricks.sdk import WorkspaceClient
+import json
+from mcp.client.streamable_http import streamablehttp_client
+from mcp import ClientSession
+
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+TAVILY_MCP_URL = os.environ.get(
+    "TAVILY_MCP_URL",
+    f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}",
+)
 
 # Essential Energy depot areas → (display name, local council domain, LGA name)
 DEPOT_AREAS = {
@@ -31,51 +38,55 @@ DEPOT_AREAS = {
     "moree":          ("Moree NSW",          "mpsc.nsw.gov.au",            "Moree Plains"),
 }
 
-# Authoritative NSW sources for road/traffic/events
 NSW_DOMAINS = [
     "livetraffic.com",
     "transport.nsw.gov.au",
     "essentialenergy.com.au",
     "ses.nsw.gov.au",
     "rfs.nsw.gov.au",
-    "eventbrite.com.au",
 ]
 
 
-def _get_api_key() -> str:
-    """Resolve Tavily API key: env var first, then Databricks secret scope fallback."""
-    key = os.environ.get("TAVILY_API_KEY", "")
-    if key:
-        return key
-    try:
-        w = WorkspaceClient()
-        resp = w.secrets.get_secret("ziviles", "tavily-api-key")
-        if resp.value:
-            import base64
-            return base64.b64decode(resp.value).decode("utf-8")
-    except Exception as e:
-        print(f"[WEB_SEARCH] Could not read secret from scope: {e}")
-    raise RuntimeError("TAVILY_API_KEY not found in env or Databricks secrets")
-
-
-def _get_client() -> AsyncTavilyClient:
-    return AsyncTavilyClient(api_key=_get_api_key())
-
-
 def _resolve_location(location: str) -> tuple[str, str | None, str | None]:
-    """Return (display_name, council_domain_or_None, lga_name_or_None)."""
     loc = location.strip()
     loc_lower = loc.lower()
     if loc_lower in DEPOT_AREAS:
         return DEPOT_AREAS[loc_lower]
-    # Fuzzy match — check if input is substring of a known area
     for key, (display, domain, lga) in DEPOT_AREAS.items():
         if loc_lower in key or key in loc_lower:
             return (display, domain, lga)
-    # Unknown area — still search but without council domain
     if "nsw" not in loc_lower:
         loc = f"{loc} NSW"
     return (loc, None, None)
+
+
+async def _mcp_search(query: str, max_results: int = 5, include_domains: list[str] | None = None) -> list[dict]:
+    """Call Tavily MCP search tool."""
+    try:
+        async with streamablehttp_client(TAVILY_MCP_URL) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                args = {
+                    "query": query,
+                    "max_results": max_results,
+                    "search_depth": "advanced",
+                }
+                if include_domains:
+                    args["include_domains"] = include_domains
+
+                result = await session.call_tool("tavily_search", args)
+
+                # Parse result — MCP returns content items with text
+                for item in result.content:
+                    text = item.text if hasattr(item, "text") else str(item)
+                    try:
+                        data = json.loads(text)
+                        return data.get("results", [])
+                    except json.JSONDecodeError:
+                        pass
+    except Exception as e:
+        print(f"[WEB_SEARCH] MCP search error: {e}")
+    return []
 
 
 async def search_local_notices(location: str, search_type: str = "all") -> str:
@@ -88,45 +99,35 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
     Returns:
         Formatted string of search results.
     """
-    client = _get_client()
     loc, council_domain, lga = _resolve_location(location)
     town = loc.replace(" NSW", "")
     town_nsw = f"{town} NSW"
 
-    # Build targeted queries with Australian context
     searches = []
 
     if search_type in ("road_works", "all"):
-        # Query 1: Council-specific road works (use include_domains if we know the council)
         council_domains = [council_domain] if council_domain else []
         searches.append({
             "query": f"road closure road works {town_nsw}",
             "domains": council_domains,
-            "topic": "general",
         })
-        # Query 2: Live Traffic NSW + Transport NSW for the area
         searches.append({
-            "query": f"site:livetraffic.com OR site:transport.nsw.gov.au {town_nsw} road closure",
+            "query": f"{town_nsw} road closure traffic disruption",
             "domains": ["livetraffic.com", "transport.nsw.gov.au"],
-            "topic": "general",
         })
 
     if search_type in ("community_events", "all"):
-        # Query 3: Local events — target council + event sites
         event_domains = [council_domain] if council_domain else []
         event_domains.append("eventbrite.com.au")
         searches.append({
             "query": f"{town_nsw} community event festival market fair 2026",
             "domains": event_domains,
-            "topic": "general",
         })
 
     if search_type == "all":
-        # Query 4: Planned outages from Essential Energy + emergency services
         searches.append({
             "query": f"{town_nsw} planned outage power disruption Essential Energy",
             "domains": ["essentialenergy.com.au"],
-            "topic": "general",
         })
 
     all_results = []
@@ -138,43 +139,34 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
         nsw_keywords.append(lga.lower())
 
     for search in searches:
-        try:
-            response = await client.search(
-                query=search["query"],
-                max_results=5,
-                search_depth="advanced",
-                include_domains=search["domains"] if search["domains"] else [],
-                topic=search["topic"],
+        results = await _mcp_search(
+            query=search["query"],
+            max_results=5,
+            include_domains=search["domains"] if search["domains"] else None,
+        )
+        for r in results:
+            title = r.get("title", "No title")
+            url = r.get("url", "")
+            content = r.get("content", "")
+
+            text_lower = (title + " " + content + " " + url).lower()
+            is_relevant = (
+                town.lower() in text_lower
+                or (lga and lga.lower() in text_lower)
+                or (council_domain and council_domain in url)
+                or any(d in url for d in NSW_DOMAINS)
             )
-            results = response.get("results", [])
-            for r in results:
-                title = r.get("title", "No title")
-                url = r.get("url", "")
-                content = r.get("content", "")
-                score = r.get("score", 0)
+            if not is_relevant:
+                continue
 
-                # Relevance filter — must mention the town or LGA or be from a known domain
-                text_lower = (title + " " + content + " " + url).lower()
-                is_relevant = (
-                    town.lower() in text_lower
-                    or (lga and lga.lower() in text_lower)
-                    or (council_domain and council_domain in url)
-                    or any(d in url for d in NSW_DOMAINS)
-                )
-                if not is_relevant:
-                    print(f"[WEB_SEARCH] Filtered out irrelevant result: {title[:60]}")
-                    continue
-
-                if len(content) > 400:
-                    content = content[:400] + "..."
-                all_results.append({
-                    "title": title, "url": url, "content": content, "score": score,
-                })
-        except Exception as e:
-            print(f"[WEB_SEARCH] Error searching '{search['query']}': {e}")
+            if len(content) > 400:
+                content = content[:400] + "..."
+            all_results.append({
+                "title": title, "url": url, "content": content,
+                "score": r.get("score", 0),
+            })
 
     if not all_results:
-        # No results — return helpful fallback with direct links
         fallback = [f"No current notices found for {loc} via web search.\n"]
         fallback.append("**Check these sources directly:**")
         if council_domain:
@@ -184,7 +176,7 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
         fallback.append("- NSW SES: https://www.ses.nsw.gov.au")
         return "\n".join(fallback)
 
-    # Deduplicate by URL, sort by relevance score
+    # Deduplicate by URL, sort by relevance
     seen_urls = set()
     unique = []
     for r in sorted(all_results, key=lambda x: x["score"], reverse=True):
@@ -192,7 +184,6 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
             seen_urls.add(r["url"])
             unique.append(r)
 
-    # Format output
     parts = [f"**Local notices near {loc}** ({len(unique)} results):\n"]
     for i, r in enumerate(unique[:8], 1):
         parts.append(f"**{i}. {r['title']}**")
