@@ -131,6 +131,15 @@ async def _run_sql(sql: str) -> list[list] | None:
 
 async def _query_uc_function(station_name: str, forecast_date: str | None) -> str | None:
     """Call the UC function to get weather data."""
+    import re
+    # Validate inputs to prevent SQL injection (SQL statements API doesn't support params)
+    if not re.match(r'^[A-Za-z ]+$', station_name):
+        print(f"[WEATHER] Invalid station name: {station_name}")
+        return None
+    if forecast_date and not re.match(r'^\d{4}-\d{2}-\d{2}$', forecast_date):
+        print(f"[WEATHER] Invalid date: {forecast_date}")
+        return None
+
     if forecast_date:
         sql = f"SELECT * FROM {UC_FUNCTION}('{station_name}', '{forecast_date}') WHERE HOUR(observation_time) BETWEEN 6 AND 18"
     else:
