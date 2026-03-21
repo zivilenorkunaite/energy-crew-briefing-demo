@@ -15,7 +15,17 @@ host = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl(
 notebook_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None)
 
 APP_URL = "https://ee-crew-briefing-1313663707993479.aws.databricksapps.com"
-HEADERS = {"Authorization": f"Bearer {notebook_token}"}
+
+# The app proxy needs a workspace-scoped token — create a short-lived PAT
+pat_resp = requests.post(
+    f"{host}/api/2.0/token/create",
+    headers={"Authorization": f"Bearer {notebook_token}", "Content-Type": "application/json"},
+    json={"comment": "cache-warm-job", "lifetime_seconds": 1800},
+).json()
+app_token = pat_resp.get("token_value", notebook_token)
+print(f"App token: {'PAT' if pat_resp.get('token_value') else 'notebook'} ({len(app_token)} chars)")
+
+HEADERS = {"Authorization": f"Bearer {app_token}"}
 
 # Expected cache entries (from warm_cache.py)
 EXPECTED = {
@@ -132,6 +142,15 @@ for tool, exp in EXPECTED.items():
     status = "OK" if actual >= exp * TARGET_PCT else "LOW"
     print(f"  {tool:25s}: {actual:4d}/{exp} ({status})")
 print(f"{'='*60}")
+
+# Cleanup: revoke the temporary PAT
+if pat_resp.get("token_info", {}).get("token_id"):
+    requests.post(
+        f"{host}/api/2.0/token/delete",
+        headers={"Authorization": f"Bearer {notebook_token}", "Content-Type": "application/json"},
+        json={"token_id": pat_resp["token_info"]["token_id"]},
+    )
+    print("Temporary PAT revoked")
 
 if total < TARGET_COUNT * 0.5:
     raise Exception(f"Cache critically low: {total}/{TARGET_COUNT} — check app health")
