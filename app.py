@@ -243,6 +243,22 @@ async def clear_cache_all():
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/api/cache/warm")
+async def warm_cache_endpoint():
+    """Warm the cache — SSE stream of progress."""
+    from server.warm_cache import warm_cache
+
+    async def generate():
+        async for progress in warm_cache():
+            yield f"data: {json.dumps(progress)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── Static files ──────────────────────────────────────────────────────────────
 
 static_dir = Path(__file__).parent / "static"

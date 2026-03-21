@@ -68,12 +68,22 @@
       <div id="status"></div>
       <button class="btn btn-all" onclick="clearAll()">Clear All Cache</button>
     </div>
+
+    <div style="text-align:center;padding:16px 0;">
+      <span id="warmLink" onclick="warmCache()" style="color:#a0aec0;font-size:12px;cursor:pointer;text-decoration:underline dotted;user-select:none;">Pre-load cache for all locations and dates</span>
+      <div id="warmProgress" style="display:none;margin-top:8px;font-size:12px;color:#718096;">
+        <div style="background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;margin:6px 0;">
+          <div id="warmBar" style="background:var(--ee-navy);height:100%;width:0%;transition:width 0.3s;border-radius:4px;"></div>
+        </div>
+        <span id="warmText">Starting...</span>
+      </div>
+    </div>
   </div>
 
   <script>
     const TOOL_LABELS = {
       'get_swms': { name: 'SWMS Knowledge Assistant', ttl: '24 hours' },
-      'query_genie': { name: 'Genie (WACS Database)', ttl: '10 minutes' },
+      'query_genie': { name: 'Genie (WACS Database)', ttl: '2 hours' },
       'search_local_notices': { name: 'Web Search (Local Notices)', ttl: '2 hours' },
       'query_weather': { name: 'Weather', ttl: '30 minutes' },
     };
@@ -154,6 +164,56 @@
     }
 
     loadStats();
+
+    // Warm cache
+    let warming = false;
+    async function warmCache() {
+      if (warming) return;
+      warming = true;
+      const link = document.getElementById('warmLink');
+      const prog = document.getElementById('warmProgress');
+      const bar = document.getElementById('warmBar');
+      const text = document.getElementById('warmText');
+      link.style.color = '#718096';
+      link.textContent = 'Warming cache...';
+      prog.style.display = 'block';
+
+      try {
+        const res = await fetch('/api/cache/warm', { method: 'POST' });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const d = JSON.parse(line.slice(6));
+              const pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
+              bar.style.width = pct + '%';
+              text.textContent = `${d.phase}: ${d.done}/${d.total} (${d.skipped} cached, ${d.errors} errors)`;
+              if (d.phase === 'done') {
+                link.textContent = 'Cache warmed';
+                link.style.color = '#276749';
+                setTimeout(() => { link.textContent = 'Pre-load cache for all locations and dates'; link.style.color = '#a0aec0'; }, 5000);
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {
+        text.textContent = 'Error: ' + e.message;
+      }
+
+      warming = false;
+      loadStats();
+      setTimeout(() => { prog.style.display = 'none'; bar.style.width = '0%'; }, 8000);
+    }
   </script>
 </body>
 </html>
