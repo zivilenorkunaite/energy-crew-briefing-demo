@@ -46,4 +46,4 @@ def get_workspace_host() -> str:
             w = WorkspaceClient(profile=profile)
             return w.config.host
         except Exception:
-            return os.environ.get("DATABRICKS_HOST", "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com")
+            return os.environ.get("DATABRICKS_HOST", "")
