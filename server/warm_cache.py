@@ -114,7 +114,7 @@ async def warm_cache() -> AsyncGenerator[dict, None]:
         yield prog("weather", f"Weather {min(done, total_swms + total_weather)}/{total_swms + total_weather}")
 
     # ── Phase 3: Web + Genie (interleaved, parallel) ──
-    yield prog("web+genie", "Loading web searches + Genie queries...")
+    yield prog("web", "Loading web searches...")
 
     async def do_web(loc):
         nonlocal done, skipped, errors
@@ -150,15 +150,20 @@ async def warm_cache() -> AsyncGenerator[dict, None]:
                 errors += 1
             done += 1
 
+    # ── Phase 3: Web Search (19 locations) ──
     web_coros = [do_web(loc) for loc in _LOCATIONS]
+    for i in range(0, len(web_coros), 5):
+        await asyncio.gather(*web_coros[i:i + 5])
+        yield prog("web", f"Web {done}/{total}")
+
+    # ── Phase 4: Genie (crews × dates) ──
+    yield prog("genie", "Loading Genie queries...")
     genie_coros = [do_genie(crew, d)
                    for crews in _LOCATION_CREWS.values()
                    for crew in crews
                    for d in dates]
-
-    all_coros = web_coros + genie_coros
-    for i in range(0, len(all_coros), 10):
-        await asyncio.gather(*all_coros[i:i + 20])
-        yield prog("web+genie", f"{done}/{total}")
+    for i in range(0, len(genie_coros), 6):
+        await asyncio.gather(*genie_coros[i:i + 6])
+        yield prog("genie", f"Genie {done}/{total}")
 
     yield prog("done", f"Complete — {done} processed, {skipped} cached, {errors} errors")
