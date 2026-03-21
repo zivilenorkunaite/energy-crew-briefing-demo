@@ -1,0 +1,29 @@
+artifact_path: /Users/zivile.norkunaite/ee-crew-briefing/mlruns/1/models/m-af4617d5a28c4e1996cc4426327c6859/artifacts
+env_vars:
+- DATABRICKS_HOST
+flavors:
+  python_function:
+    cloudpickle_version: 3.1.2
+    code: null
+    config:
+      llm_endpoint: crew-briefing-agent
+      vs_index: zivile.essential_energy_wacs.swms_documents_vs_index
+      workspace_host: https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pyfunc.loaders.code_model
+    model_code_path: /private/tmp/swms_agent_model.py
+    python_version: 3.14.3
+    streamable: false
+mlflow_version: 3.10.0
+model_id: m-af4617d5a28c4e1996cc4426327c6859
+model_size_bytes: 5777
+model_uuid: m-af4617d5a28c4e1996cc4426327c6859
+prompts: null
+run_id: cbcc2c8cb2d04e55af46ee461ca4a737
+saved_input_example_info:
+  artifact_path: input_example.json
+  serving_input_path: serving_input_example.json
+  type: json_object
+utc_time_created: '2026-03-21 01:43:14.342434'

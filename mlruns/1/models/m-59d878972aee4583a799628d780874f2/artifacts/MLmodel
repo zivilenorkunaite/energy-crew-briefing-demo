@@ -1,0 +1,41 @@
+artifact_path: /Users/zivile.norkunaite/ee-crew-briefing/mlruns/1/models/m-59d878972aee4583a799628d780874f2/artifacts
+env_vars:
+- DATABRICKS_HOST
+flavors:
+  python_function:
+    cloudpickle_version: 3.1.2
+    code: null
+    config:
+      ai_gateway_url: https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions
+      llm_model: databricks-claude-sonnet-4-6
+      vs_index: zivile.essential_energy_wacs.swms_documents_vs_index
+      workspace_host: https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pyfunc.loaders.code_model
+    model_code_path: /private/tmp/swms_agent_v2.py
+    python_version: 3.14.3
+    streamable: false
+is_signature_from_type_hint: false
+mlflow_version: 3.10.0
+model_id: m-59d878972aee4583a799628d780874f2
+model_size_bytes: 4925
+model_uuid: m-59d878972aee4583a799628d780874f2
+prompts: null
+run_id: 7003db4bd2db47ef9ffd861b0b8dc954
+saved_input_example_info:
+  artifact_path: input_example.json
+  serving_input_path: serving_input_example.json
+  type: json_object
+signature:
+  inputs: '[{"type": "array", "items": {"type": "object", "properties": {"content":
+    {"type": "string", "required": true}, "role": {"type": "string", "required": true}}},
+    "name": "messages", "required": true}]'
+  outputs: '[{"type": "array", "items": {"type": "object", "properties": {"finish_reason":
+    {"type": "string", "required": true}, "message": {"type": "object", "properties":
+    {"content": {"type": "string", "required": true}, "role": {"type": "string", "required":
+    true}}, "required": true}}}, "name": "choices", "required": true}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-03-21 03:02:35.880309'

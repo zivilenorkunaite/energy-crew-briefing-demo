@@ -6,4 +6,3 @@ databricks-mcp
 tavily-python
 asyncpg
 mlflow
-pyyaml

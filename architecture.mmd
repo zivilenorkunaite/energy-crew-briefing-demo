@@ -1,0 +1,159 @@
+flowchart TB
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 0 — OBSERVABILITY                           │
+    %% └──────────────────────────────────────────────────┘
+    subgraph OBS["Observability"]
+        direction LR
+        MLFLOW["MLflow Experiment\nAgent Traces\nspans per step · tool · guardrail"]
+        INFTBL["AI Gateway\nInference Tables\nall LLM req / resp logged"]
+    end
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 1 — USER                                    │
+    %% └──────────────────────────────────────────────────┘
+    USER(["Field Supervisor  ·  Browser"])
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 2 — APP                                     │
+    %% └──────────────────────────────────────────────────┘
+    subgraph APP["Databricks App  ·  ee-crew-briefing"]
+        FASTAPI["FastAPI Backend  +  Vanilla JS Chat UI  (marked.js)"]
+    end
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 3 — AI GATEWAY                              │
+    %% └──────────────────────────────────────────────────┘
+    subgraph AIBOX["Model Serving  ·  crew-briefing-agent"]
+        direction LR
+        GW["AI Gateway\nClaude Sonnet 4-6\nLlama 3 fallback"]
+        SUP["① SUPERVISOR\nDecide tools"]
+        WRITER["② WRITER\nCompose briefing"]
+        GW --> SUP
+        GW --> WRITER
+    end
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 4 — TOOL CALLS                              │
+    %% └──────────────────────────────────────────────────┘
+    subgraph TOOLS["Agentic Tool Calls  ·  parallel execution"]
+        direction LR
+        GENIE["Genie Room\nField Operations"]
+        SWMS_TOOL["SWMS Knowledge\nAssistant"]
+        WX_TOOL["Weather Tool"]
+        WEB_TOOL["Web Search Tool"]
+    end
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 5 — DATA SERVICES                           │
+    %% └──────────────────────────────────────────────────┘
+    subgraph DATA["Data Services"]
+        direction LR
+        WH["SQL Warehouse\nc2abb17a6c9e6bc0"]
+        subgraph VS_BOX["Vector Search"]
+            VS["swms_documents_vs_index"]
+            GTE["GTE-Large\nEmbeddings Endpoint"]
+            VS -. "embed" .-> GTE
+        end
+        TAVILY(["Tavily Web Search API\nroad closures · local events"])
+    end
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 6 — UNITY CATALOG                           │
+    %% └──────────────────────────────────────────────────┘
+    subgraph UC["Unity Catalog  ·  zivile.essential_energy_wacs"]
+        direction LR
+        WACS[("WACS Delta Tables\nassets · work_orders · work_tasks\ndepots · investments + 3 more")]
+        WXTBL[("bom_weather\nDelta Table")]
+        SWMSTBL[("swms_documents\nVolume")]
+    end
+
+    %% ┌──────────────────────────────────────────────────┐
+    %% │  ROW 7 — PERSISTENCE + JOBS + SECRETS            │
+    %% └──────────────────────────────────────────────────┘
+    subgraph BOTTOM["Platform Services"]
+        direction LR
+        subgraph PERSIST["Persistence"]
+            LB[("Lakebase Autoscaling\nPostgreSQL  ·  ee-crew-briefing-as\nconversations  ·  messages")]
+        end
+        subgraph BGJOBS["Scheduled Jobs"]
+            direction TB
+            GWJOB["Gateway Token Refresh\nevery 30 min"]
+            WXJOB["Weather Refresh Job\nhourly"]
+        end
+        subgraph SEC["Secret Scope"]
+            direction TB
+            S2["gateway-token"]
+            S1["tavily-api-key"]
+        end
+        BOM(["BOM Weather API"])
+    end
+
+    %% ══════════════════════════════════════════
+    %% EDGES
+    %% ══════════════════════════════════════════
+
+    %% User flow
+    USER -- "chat message" --> FASTAPI
+    FASTAPI -- "POST /chat" --> GW
+    WRITER -- "streaming briefing" --> FASTAPI
+    FASTAPI -- "response" --> USER
+
+    %% Tool dispatch
+    SUP -- "dispatch" --> GENIE
+    SUP -- "dispatch" --> SWMS_TOOL
+    SUP -- "dispatch" --> WX_TOOL
+    SUP -- "dispatch" --> WEB_TOOL
+
+    %% Tool → Data
+    GENIE --> WH
+    SWMS_TOOL --> VS
+    VS --> SWMSTBL
+    SWMS_TOOL -- "synthesize" --> GW
+    WX_TOOL --> WH
+    WEB_TOOL --> TAVILY
+    WEB_TOOL --> S1
+
+    %% SQL Warehouse → UC tables
+    WH --> WACS
+    WH --> WXTBL
+
+    %% Persistence
+    FASTAPI -- "save conversation" --> LB
+
+    %% Observability
+    FASTAPI -. "traces" .-> MLFLOW
+    GW -. "inference logs" .-> INFTBL
+
+    %% Background jobs
+    GWJOB -- "rotate PAT" --> S2
+    S2 --> GW
+    WXJOB --> BOM
+    WXJOB -- "write" --> WXTBL
+
+    %% ══════════════════════════════════════════
+    %% STYLES
+    %% ══════════════════════════════════════════
+    classDef blue fill:#1565C0,stroke:#42A5F5,color:#fff
+    classDef green fill:#2E7D32,stroke:#66BB6A,color:#fff
+    classDef orange fill:#BF360C,stroke:#FF7043,color:#fff
+    classDef purple fill:#6A1B9A,stroke:#CE93D8,color:#fff
+    classDef gray fill:#37474F,stroke:#78909C,color:#fff
+
+    class FASTAPI,WH,GW,SUP,WRITER,GTE,VS,GENIE,SWMS_TOOL,WX_TOOL,WEB_TOOL blue
+    class WACS,WXTBL,SWMSTBL,LB green
+    class TAVILY,BOM,USER orange
+    class MLFLOW,INFTBL purple
+    class S1,S2,GWJOB,WXJOB gray
+
+    style APP fill:#0D253F,stroke:#1565C0,color:#90CAF9
+    style AIBOX fill:#0D253F,stroke:#1565C0,color:#90CAF9
+    style TOOLS fill:#0D2A45,stroke:#1976D2,color:#90CAF9
+    style DATA fill:#0D253F,stroke:#1976D2,color:#90CAF9
+    style VS_BOX fill:#071A2F,stroke:#1565C0,color:#90CAF9
+    style UC fill:#1B3A1F,stroke:#388E3C,color:#A5D6A7
+    style OBS fill:#2A1535,stroke:#6A1B9A,color:#CE93D8
+    style BOTTOM fill:#111827,stroke:#37474F,color:#CFD8DC
+    style PERSIST fill:#1B3A1F,stroke:#2E7D32,color:#A5D6A7
+    style BGJOBS fill:#1C2B30,stroke:#455A64,color:#CFD8DC
+    style SEC fill:#1C2B30,stroke:#455A64,color:#CFD8DC

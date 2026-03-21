@@ -83,27 +83,8 @@ def _load_prompts_from_registry():
         _PROMPT_VERSION = f"sv-v{sv.version}_wr-v{wr.version}"
         print(f"[AGENT] Loaded prompts from registry: supervisor v{sv.version}, writer v{wr.version} (@{_PROMPT_ALIAS})")
     except Exception as e:
-        import traceback
         print(f"[AGENT] Prompt Registry load failed: {e}")
-        traceback.print_exc()
-        print("[AGENT] Falling back to YAML...")
-        _load_prompts_from_yaml()
-
-def _load_prompts_from_yaml():
-    """Fallback: load from prompts.yaml."""
-    global _supervisor_prompt_template, _writer_prompt_template, _PROMPT_VERSION
-    from pathlib import Path
-    import yaml
-    prompts_path = Path(__file__).parent / "prompts.yaml"
-    if prompts_path.exists():
-        with open(prompts_path) as f:
-            data = yaml.safe_load(f)
-        _supervisor_prompt_template = data.get("supervisor", {}).get("template")
-        _writer_prompt_template = data.get("writer", {}).get("template")
-        _PROMPT_VERSION = f"yaml-v{data.get('version', '?')}"
-        print(f"[AGENT] Loaded prompts from YAML v{data.get('version', '?')}")
-    else:
-        print("[AGENT] No prompts found — using minimal defaults")
+        print("[AGENT] Using minimal default prompts")
 
 # Load at startup
 _load_prompts_from_registry()
