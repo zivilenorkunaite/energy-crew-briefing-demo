@@ -77,6 +77,9 @@ resources:
             id: c2abb17a6c9e6bc0
             permission: CAN_USE
 
+        # NOTE: UC function zivile.essential_energy_wacs.get_weather — EXECUTE granted to SP directly
+        # (function resources not supported in bundle format)
+
         # NOTE: postgres and genie resources are not supported in bundle format.
         # They are managed via REST API in deploy.sh:
         #   - Lakebase Autoscaling (ee-crew-briefing-as) — CAN_CONNECT_AND_CREATE
