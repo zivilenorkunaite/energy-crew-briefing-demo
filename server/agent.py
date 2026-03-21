@@ -591,7 +591,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
     supervisor_messages = list(history) + [{"role": "user", "content": user_message}]
     sources = []
     tool_results_for_writer = []  # Collect all tool results for the writer
-    max_supervisor_iterations = 3
+    max_supervisor_iterations = 2
 
     for iteration in range(max_supervisor_iterations):
         print(f"[SUPERVISOR] Iteration {iteration + 1}, messages={len(supervisor_messages)}")
@@ -722,7 +722,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 wr_span.set_inputs({"model": LLM_MODEL, "tool_results_count": len(tool_results_for_writer)})
                 final_text = await _call_llm_stream(
                     _build_writer_prompt(),
-                    writer_messages, max_tokens=3000,
+                    writer_messages, max_tokens=1500,
                     on_token=on_token,
                 )
                 wr_span.set_outputs({"response_length": len(final_text)})
@@ -730,13 +730,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
             print(f"[WRITER] Span error: {e}")
             final_text = await _call_llm_stream(
                 _build_writer_prompt(),
-                writer_messages, max_tokens=3000,
+                writer_messages, max_tokens=1500,
                 on_token=on_token,
             )
     else:
         final_text = await _call_llm_stream(
             _build_writer_prompt(),
-            writer_messages, max_tokens=3000,
+            writer_messages, max_tokens=1500,
             on_token=on_token,
         )
 

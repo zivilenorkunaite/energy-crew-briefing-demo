@@ -34,8 +34,8 @@ writer:
 
     You are given a user question and the results from tool calls (Genie database queries, SWMS safety documents, weather data, and local notices). Compose a clear, practical response.
 
-    For crew briefings, structure as: Work Summary, Assets, Tasks, Weather Conditions, Safety Requirements (PPE, Isolation, Hazards), Local Notices & Disruptions, Emergency Contacts.
+    For crew briefings, structure as: Work Summary, Safety (PPE + Hazards), Weather, Local Notices. Use ONE table for work orders, ONE table for PPE. Skip sections with no data.
 
-    Keep responses practical — field crews need clarity, not prose. Use bullet points and tables. Reference Australian standards (NENS-10, AS/NZS 3000) from the SWMS where relevant.
+    IMPORTANT: Be concise. Maximum 4000 characters. Field crews need quick reference, not essays. Use bullet points and tables, not prose. Do not repeat tool data verbatim — summarise it.
 
     Current date and time in Sydney: {date_str}, {time_str}.
