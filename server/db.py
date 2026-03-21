@@ -1,121 +1,63 @@
-"""Lakebase (PostgreSQL) async connection pool with OAuth token refresh.
+"""Lakebase Autoscaling — async connection pool with OAuth token rotation.
 
-Uses PGHOST, PGPORT, PGDATABASE from the Databricks app database resource;
-password is a short-lived token from /api/2.0/database/credentials.
+Uses PGHOST, PGPORT, PGDATABASE, PGUSER from the database app resource;
+tokens are generated via WorkspaceClient().postgres.generate_database_credential().
 """
 
 import os
 import asyncpg
-import aiohttp
 from typing import Optional, List, Any
-from server.config import get_oauth_token, get_workspace_host
 
 SCHEMA = os.environ.get("PGSCHEMA", "public")
-_LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE", "ee-crew-briefing")
+_ENDPOINT_NAME = os.environ.get(
+    "ENDPOINT_NAME",
+    "projects/ee-crew-briefing-as/branches/production/endpoints/primary",
+)
 
 
-async def _get_database_token() -> Optional[str]:
-    """Get database credential token. Tries PGPASSWORD, then SDK, then credentials API."""
-    # 1. PGPASSWORD env var (injected by database resource or set manually)
-    pg_password = os.environ.get("PGPASSWORD")
-    if pg_password:
-        return pg_password
-
-    # 2. Try Databricks SDK database credential generation
-    try:
-        from databricks.sdk import WorkspaceClient
-        w = WorkspaceClient()
-        cred = w.database.generate_database_credential(instance_names=[_LAKEBASE_INSTANCE])
-        token = getattr(cred, "token", None)
-        if token:
-            print(f"[DB] Got credential via SDK ({len(token)} chars)")
-            return token
-    except Exception as e:
-        print(f"[DB] SDK credential generation failed: {e}")
-
-    # 3. Try REST API
-    try:
-        workspace_token = get_oauth_token()
-        if not workspace_token:
-            return None
-        workspace_host = get_workspace_host()
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{workspace_host}/api/2.0/database/credentials",
-                headers={"Authorization": f"Bearer {workspace_token}"},
-                json={"instance_names": [_LAKEBASE_INSTANCE]},
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                data = await resp.json()
-                token = data.get("token")
-                if token:
-                    return token
-    except Exception as e:
-        print(f"[DB] REST credentials API failed: {e}")
-
-    print("[DB] No database credential available")
-    return None
+def _generate_token() -> str:
+    """Generate a fresh OAuth token for Lakebase Autoscaling."""
+    from databricks.sdk import WorkspaceClient
+    w = WorkspaceClient()
+    cred = w.postgres.generate_database_credential(endpoint=_ENDPOINT_NAME)
+    token = getattr(cred, "token", None) or getattr(cred, "password", "")
+    if not token:
+        raise RuntimeError("generate_database_credential returned no token")
+    print(f"[DB] Generated Lakebase token ({len(token)} chars)")
+    return token
 
 
 class DatabasePool:
-    """Async database pool with OAuth token refresh."""
+    """Async database pool with OAuth token refresh for Lakebase Autoscaling."""
 
     def __init__(self):
         self._pool: Optional[asyncpg.Pool] = None
 
-    def _resolve_pghost(self) -> bool:
-        """Resolve PGHOST from Lakebase instance API if not set."""
-        if os.environ.get("PGHOST"):
-            return True
-        if not _LAKEBASE_INSTANCE:
-            return False
-        try:
-            from databricks.sdk import WorkspaceClient
-            w = WorkspaceClient()
-            instance = w.database.get_database_instance(name=_LAKEBASE_INSTANCE)
-            host = getattr(instance, "read_write_dns", None) or getattr(instance, "host", None)
-            if host:
-                os.environ["PGHOST"] = host
-                print(f"[DB] Resolved PGHOST from instance {_LAKEBASE_INSTANCE}: {host}")
-                return True
-        except Exception as e:
-            print(f"[DB] Could not resolve PGHOST from instance API: {e}")
-        return False
-
     async def get_pool(self) -> asyncpg.Pool:
-        """Return the connection pool."""
-        if not self._resolve_pghost():
-            raise RuntimeError(
-                f"Cannot connect to database: PGHOST is not set and could not be resolved from "
-                f"LAKEBASE_INSTANCE ({_LAKEBASE_INSTANCE})."
-            )
-
+        """Return the connection pool, creating it if needed."""
         if self._pool is None:
-            pg_host = os.environ["PGHOST"]
+            pg_host = os.environ.get("PGHOST")
+            if not pg_host:
+                raise RuntimeError("PGHOST is not set — add Lakebase as a database resource")
+
             raw_port = os.environ.get("PGPORT", "5432")
             try:
                 pg_port = int(raw_port)
             except (ValueError, TypeError):
                 pg_port = 5432
-            pg_db = os.environ.get("PGDATABASE", "crew_briefing")
 
-            # Try database credentials API first
-            token = await _get_database_token()
+            pg_db = os.environ.get("PGDATABASE", "databricks_postgres")
             pg_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
-
-            if token:
-                password = token
-            else:
-                raise RuntimeError("Cannot connect to database: No credential obtained.")
+            token = _generate_token()
 
             self._pool = await asyncpg.create_pool(
                 host=pg_host,
                 port=pg_port,
                 database=pg_db,
                 user=pg_user,
-                password=password,
+                password=token,
                 ssl="require",
-                min_size=2,
+                min_size=1,
                 max_size=10,
                 command_timeout=60,
             )
@@ -124,7 +66,7 @@ class DatabasePool:
         return self._pool
 
     async def refresh_token(self):
-        """Refresh database token (Lakebase tokens expire after ~1h)."""
+        """Refresh database token (tokens expire after ~1h)."""
         if self._pool:
             await self._pool.close()
             self._pool = None

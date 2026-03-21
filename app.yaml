@@ -1,10 +1,20 @@
 command: ['python', '-m', 'uvicorn', 'app:app', '--host', '0.0.0.0', '--port', '8000']
 env:
   - name: SERVING_ENDPOINT
-    value: 'ee-crew-briefing-gateway'
+    value: 'crew-briefing-agent'
+  - name: SUPERVISOR_ENDPOINT
+    value: 'crew-briefing-agent'
   - name: TAVILY_API_KEY
     valueFrom: 'tavily-api-key'
-  - name: LAKEBASE_INSTANCE
-    value: 'ee-crew-briefing'
+  - name: PGHOST
+    value: 'ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com'
   - name: PGDATABASE
-    value: 'crew_briefing'
+    value: 'databricks_postgres'
+  - name: PGPORT
+    value: '5432'
+  - name: PGSSLMODE
+    value: 'require'
+  - name: ENDPOINT_NAME
+    value: 'projects/ee-crew-briefing-as/branches/production/endpoints/primary'
+  - name: SWMS_ENDPOINT
+    value: 'swms-knowledge-assistant-serving-endpoint'

@@ -4,6 +4,20 @@ bundle:
 workspace:
   host: https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com
 
+sync:
+  exclude:
+    - .git/
+    - .databricks/
+    - .env
+    - __pycache__/
+    - "*.pyc"
+    - swms_pdfs/
+    - mlflow.db
+    - mlruns/
+    - generate_swms_pdfs.py
+    - architecture.*
+    - mermaid-config.json
+
 resources:
   apps:
     ee-crew-briefing:
@@ -23,38 +37,55 @@ resources:
           - "8000"
         env:
           - name: SERVING_ENDPOINT
-            value: databricks-claude-sonnet-4-6
+            value: crew-briefing-agent
+          - name: SUPERVISOR_ENDPOINT
+            value: crew-briefing-agent
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
-          - name: LAKEBASE_INSTANCE
-            value: ee-crew-briefing
+          - name: PGHOST
+            value: ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com
           - name: PGDATABASE
-            value: crew_briefing
+            value: databricks_postgres
+          - name: PGPORT
+            value: "5432"
+          - name: PGSSLMODE
+            value: require
+          - name: ENDPOINT_NAME
+            value: projects/ee-crew-briefing-as/branches/production/endpoints/primary
+          - name: SWMS_ENDPOINT
+            value: swms-knowledge-assistant-serving-endpoint
 
       resources:
-        - name: genie-room-field-ops
-          description: "Genie Room 2 — Field Operations"
-          genie:
-            space_id: 01f111b05416164989106b097e2f7d21
-            permission: CAN_RUN
+        # Resources managed by bundle (permissions auto-applied on deploy)
+        - name: crew-briefing-agent
+          description: "AI Gateway — Claude Sonnet + Llama fallback"
+          serving_endpoint:
+            name: crew-briefing-agent
+            permission: CAN_QUERY
+
+        - name: swms-ka
+          description: "SWMS Knowledge Assistant — RAG endpoint for safety documents"
+          serving_endpoint:
+            name: swms-knowledge-assistant-serving-endpoint
+            permission: CAN_QUERY
+
+        - name: tavily-api-key
+          description: "Tavily API key for web search"
+          secret:
+            scope: ee-crew-briefing
+            key: tavily-api-key
+            permission: READ
 
         - name: sql-warehouse
-          description: "SQL Warehouse for SWMS + Weather queries"
+          description: "SQL Warehouse for weather + data queries"
           sql_warehouse:
             id: c2abb17a6c9e6bc0
             permission: CAN_USE
 
-        - name: serving-endpoint-gateway
-          description: "AI Gateway with Claude + Llama fallback"
-          serving_endpoint:
-            name: ee-crew-briefing-gateway
-            permission: CAN_QUERY
-
-        - name: serving-endpoint-embeddings
-          description: "GTE-Large embedding model for Vector Search"
-          serving_endpoint:
-            name: databricks-gte-large-en
-            permission: CAN_QUERY
+        # NOTE: postgres and genie resources are not supported in bundle format.
+        # They are managed via REST API in deploy.sh:
+        #   - Lakebase Autoscaling (ee-crew-briefing-as) — CAN_CONNECT_AND_CREATE
+        #   - Genie Room (01f111b05416164989106b097e2f7d21) — CAN_RUN
 
   jobs:
     bom-weather-refresh:
@@ -63,7 +94,6 @@ resources:
         - task_key: refresh_bom
           notebook_task:
             notebook_path: setup/03_bom_refresh.py
-          existing_cluster_id: ""
           new_cluster:
             spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
@@ -71,6 +101,27 @@ resources:
             spark_conf:
               "spark.master": "local[*]"
               "spark.databricks.cluster.profile": "singleNode"
+            custom_tags:
+              ResourceClass: "SingleNode"
       schedule:
         quartz_cron_expression: "0 0 * * * ?"
+        timezone_id: "Australia/Sydney"
+
+    gateway-token-refresh:
+      name: ee-crew-briefing-gateway-token-refresh
+      tasks:
+        - task_key: refresh_token
+          notebook_task:
+            notebook_path: setup/07_refresh_gateway_token.py
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 0
+            spark_conf:
+              "spark.master": "local[*]"
+              "spark.databricks.cluster.profile": "singleNode"
+            custom_tags:
+              ResourceClass: "SingleNode"
+      schedule:
+        quartz_cron_expression: "0 */30 * * * ?"
         timezone_id: "Australia/Sydney"

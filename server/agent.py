@@ -1,5 +1,9 @@
-"""Claude agentic loop — orchestrates Genie + SWMS + Weather + Web tools with MLflow tracing."""
+"""Dual-agent loop — Haiku supervisor (tool selection) + Claude writer (response composition).
 
+MLflow tracing uses proper context-manager spans throughout.
+"""
+
+import asyncio
 import json
 import os
 import aiohttp
@@ -11,7 +15,10 @@ from server.swms import query_swms, DOCUMENT_NAMES
 from server.web_search import search_local_notices
 from server.weather import query_weather
 
-MODEL = os.environ.get("SERVING_ENDPOINT", "ee-crew-briefing-gateway")
+# Writer model — Claude Sonnet via AI Gateway (with guardrails, rate limits, inference tables)
+WRITER_MODEL = os.environ.get("SERVING_ENDPOINT", "ee-crew-briefing-gateway")
+# Supervisor model — defaults to same gateway until Haiku permission is resolved
+SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_ENDPOINT", "ee-crew-briefing-gateway")
 
 # MLflow experiment for tracing
 MLFLOW_EXPERIMENT = os.environ.get(
@@ -30,17 +37,11 @@ try:
 except Exception as e:
     print(f"[AGENT] MLflow not available, tracing disabled: {e}")
 
-def _safe_span(name, parent=None):
-    """Create an MLflow span safely, returning a context manager or None."""
-    if not _mlflow_ready or mlflow is None:
-        return None
-    try:
-        return mlflow.start_span(name=name)
-    except Exception:
-        return None
 
-def _build_system_prompt() -> str:
-    """Build system prompt with real Sydney time."""
+# ── System Prompts ──────────────────────────────────────────────────────────
+
+def _get_sydney_time() -> tuple[str, str]:
+    """Return (date_str, time_str) for Sydney."""
     from datetime import datetime
     try:
         from zoneinfo import ZoneInfo
@@ -48,60 +49,55 @@ def _build_system_prompt() -> str:
     except Exception:
         from datetime import timezone, timedelta
         now = datetime.now(timezone(timedelta(hours=11)))
-    date_str = now.strftime("%A, %d %B %Y")
-    time_str = now.strftime("%I:%M %p AEST")
+    return now.strftime("%A, %d %B %Y"), now.strftime("%I:%M %p AEST")
 
+
+_CREW_LIST = (
+    "Grafton Lines A, Grafton Lines B, Coffs Harbour Lines, Coffs Harbour Cable, "
+    "Lismore Lines, Port Macquarie Lines, Tamworth Lines, Tamworth Substation, "
+    "Armidale Lines, Armidale Inspection, Orange Lines, Orange Cable, Dubbo Lines, "
+    "Dubbo Emergency, Bathurst Lines, Wagga Wagga Lines, Wagga Wagga Inspection, "
+    "Broken Hill Lines, Moree Lines, Mudgee Lines, Inverell Lines, Queanbeyan Lines, "
+    "Contractor Downer, Contractor Asplundh, Contractor Fulton Hogan"
+)
+
+
+def _build_supervisor_prompt() -> str:
+    """Concise supervisor prompt — tool selection only, no prose."""
+    date_str, time_str = _get_sydney_time()
+    return f"""You are a tool-routing supervisor for Essential Energy field operations.
+Your ONLY job is to decide which tools to call and with what arguments. Never write a final answer.
+
+Current date/time in Sydney: {date_str}, {time_str}.
+Easter 2026 is 3-6 April (Good Friday to Easter Monday) — no planned work over Easter.
+Crews: {_CREW_LIST}.
+
+Rules:
+- For crew briefings: first call query_genie for work orders, then based on results call get_swms + query_weather + search_local_notices in parallel.
+- Query ONLY the specific date or range asked about. Do not expand ranges.
+- Always call tools — never respond with text. If no tool is needed, respond with just "DONE"."""
+
+
+def _build_writer_prompt() -> str:
+    """Writer prompt — compose final response from tool results."""
+    date_str, time_str = _get_sydney_time()
     return f"""You are an AI field operations assistant for Essential Energy, an electricity \
 distribution network operator in NSW, Australia.
 
-You help field supervisors and crew leaders with:
-- Preparing daily crew briefings before they head out
-- Answering questions about work orders, crew schedules, and asset status
-- Providing safety requirements for specific work types
-- Checking weather conditions for crew safety decisions
-- Checking for local disruptions that may affect field operations
+You help field supervisors and crew leaders with crew briefings, work orders, safety procedures, \
+and local conditions.
 
-You have four tools:
-- query_genie: Query the WACS (Work and Asset Control System) for structured data — work orders, \
-tasks, crew assignments, assets, projects, investment programs. Always use this for any question \
-about specific work orders, crews, schedules, or assets.
-- get_swms: Retrieve the Safe Work Method Statement for a specific work type — hazards, PPE, \
-isolation procedures, competency requirements. Always use this when preparing a briefing or \
-answering safety questions.
-- query_weather: Get current BOM weather observations for a depot area. Use when preparing \
-briefings to check conditions that affect crew safety (heat, wind, storms). Also use when \
-asked about weather or conditions in a specific area.
-- search_local_notices: Search the web for local council road closures, community events, planned \
-utility works, and other disruptions near a work area. Use this when preparing a crew briefing to \
-check for anything that could affect site access, traffic routes, or scheduling. Also use this when \
-the user asks about local conditions, events, or disruptions in a specific area.
+You are given a user question and the results from tool calls (Genie database queries, SWMS safety \
+documents, weather data, and local notices). Compose a clear, practical response.
 
-When preparing a crew briefing:
-1. Call query_genie to get work orders and tasks for that crew/date
-2. Identify the work type(s) and location(s) from the results
-3. Call get_swms for the relevant work type(s), query_weather for the work area, \
-AND search_local_notices for the work area (these can run in parallel)
-4. Generate a structured briefing with sections: Work Summary, Assets, Tasks, \
-Weather Conditions, Safety Requirements (PPE, Isolation, Hazards), Local Notices & Disruptions, \
-Emergency Contacts
+For crew briefings, structure as: Work Summary, Assets, Tasks, Weather Conditions, \
+Safety Requirements (PPE, Isolation, Hazards), Local Notices & Disruptions, Emergency Contacts.
 
 Keep responses practical — field crews need clarity, not prose. Use bullet points and tables. \
 Reference Australian standards (NENS-10, AS/NZS 3000) from the SWMS where relevant.
 
-Current date and time in Sydney: {date_str}, {time_str}.
+Current date and time in Sydney: {date_str}, {time_str}."""
 
-When querying for a crew's work, query ONLY the specific date or range the user asked about. \
-Use a single Genie query. If the user says "tomorrow", query tomorrow only. If they say "this week", \
-query the current work week (Monday to Friday). Do NOT automatically expand to a broader range. \
-If a crew has no work scheduled for the requested date, say so clearly — do not search for other dates.
-
-Crews are named by depot and function: Grafton Lines A, Grafton Lines B, Coffs Harbour Lines, \
-Coffs Harbour Cable, Lismore Lines, Port Macquarie Lines, Tamworth Lines, Tamworth Substation, \
-Armidale Lines, Armidale Inspection, Orange Lines, Orange Cable, Dubbo Lines, Dubbo Emergency, \
-Bathurst Lines, Wagga Wagga Lines, Wagga Wagga Inspection, Broken Hill Lines, Moree Lines, \
-Mudgee Lines, Inverell Lines, Queanbeyan Lines, Contractor Downer, Contractor Asplundh, \
-Contractor Fulton Hogan. \
-Easter 2026 is 3-6 April (Good Friday to Easter Monday) — no planned work is scheduled over Easter."""
 
 TOOLS = [
     {
@@ -239,7 +235,7 @@ INJECTION_PATTERNS = [
 
 
 def _check_input_guardrail(user_message: str) -> tuple[bool, str]:
-    """Check for prompt injection patterns and off-topic queries. Returns (passed, reason)."""
+    """Check for prompt injection patterns. Returns (passed, reason)."""
     lower = user_message.lower()
     for pattern in INJECTION_PATTERNS:
         if pattern in lower:
@@ -250,29 +246,36 @@ def _check_input_guardrail(user_message: str) -> tuple[bool, str]:
 def _check_output_guardrail(response: str) -> tuple[bool, str]:
     """Check agent response for safety issues. Returns (passed, reason)."""
     lower = response.lower()
-    # Check for contradictory safety advice
     if "skip ppe" in lower or "ppe is not required" in lower or "no need for safety" in lower:
         return False, "Response may contain unsafe safety advice"
-    # Check for hallucinated standards
     if "as/nzs 9999" in lower or "fake standard" in lower:
         return False, "Response may contain hallucinated standards"
     return True, "Output validation passed"
 
 
-# ── LLM + Tool Execution ───────────────────────────────────────────────────
+# ── LLM Calls ──────────────────────────────────────────────────────────────
 
-async def _call_claude(messages: list[dict], tools: list[dict]) -> dict[str, Any]:
-    """Call the Claude Foundation Model API (OpenAI-compatible format) with tool support."""
+async def _call_llm(
+    model: str,
+    system_prompt: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    max_tokens: int = 2500,
+    temperature: float = 0.1,
+) -> dict[str, Any]:
+    """Call a serving endpoint (OpenAI-compatible). Used for both supervisor and writer."""
     host = get_workspace_host()
     token = get_oauth_token()
-    url = f"{host}/serving-endpoints/{MODEL}/invocations"
+    url = f"{host}/serving-endpoints/{model}/invocations"
 
     payload = {
-        "messages": [{"role": "system", "content": _build_system_prompt()}] + messages,
-        "tools": tools,
-        "max_tokens": 2500,
-        "temperature": 0.1,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
     }
+    if tools:
+        payload["tools"] = tools
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -281,11 +284,11 @@ async def _call_claude(messages: list[dict], tools: list[dict]) -> dict[str, Any
     async with aiohttp.ClientSession() as session:
         async with session.post(
             url, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=120)
+            timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             if resp.status != 200:
                 error = await resp.text()
-                print(f"[LLM] Error {resp.status}: {error[:500]}")
+                print(f"[LLM:{model}] Error {resp.status}: {error[:500]}")
                 return {"content": f"[AI error {resp.status}: {error[:200]}]", "tool_calls": []}
             data = await resp.json()
 
@@ -298,8 +301,9 @@ async def _call_claude(messages: list[dict], tools: list[dict]) -> dict[str, Any
     }
 
 
+# ── Tool Execution ─────────────────────────────────────────────────────────
+
 def _unwrap_exception(e: BaseException) -> str:
-    """Extract a readable message from a plain exception or an ExceptionGroup."""
     if hasattr(e, "exceptions") and e.exceptions:
         return str(e.exceptions[0])
     return str(e)
@@ -313,61 +317,54 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
         try:
             result = await query_genie(question)
         except BaseException as e:
-            msg = _unwrap_exception(e)
-            print(f"[AGENT] Genie error: {msg}")
-            result = f"(Genie query failed: {msg})"
-        source = {"type": "genie", "label": f"Genie: {question[:70]}"}
-        return result, source
+            result = f"(Genie query failed: {_unwrap_exception(e)})"
+        return result, {"type": "genie", "label": f"Genie: {question[:70]}"}
 
     elif name == "get_swms":
-        query         = args.get("query", "")
+        query = args.get("query", "")
         document_name = args.get("document_name") or None
         print(f"[AGENT] SWMS search: {query} | doc={document_name}")
         try:
             result = await query_swms(query, document_name=document_name)
         except BaseException as e:
-            msg = _unwrap_exception(e)
-            print(f"[AGENT] SWMS error: {msg}")
-            result = f"(SWMS search failed: {msg})"
-        label = document_name or f"SWMS – {query[:50]}"
-        source = {"type": "pdf", "label": label}
-        return result, source
+            result = f"(SWMS search failed: {_unwrap_exception(e)})"
+        return result, {"type": "pdf", "label": document_name or f"SWMS – {query[:50]}"}
 
     elif name == "query_weather":
         location = args.get("location", "")
         date = args.get("date") or None
         print(f"[AGENT] Weather query: {location} | date={date}")
         try:
-            # Pass date in location string so weather.py can parse it
             loc_with_date = f"{location} {date}" if date else location
             result = await query_weather(loc_with_date)
         except BaseException as e:
-            msg = _unwrap_exception(e)
-            print(f"[AGENT] Weather error: {msg}")
-            result = f"(Weather query failed: {msg})"
-        source = {"type": "weather", "label": f"Weather: {location[:60]}"}
-        return result, source
+            result = f"(Weather query failed: {_unwrap_exception(e)})"
+        return result, {"type": "weather", "label": f"Weather: {location[:60]}"}
 
     elif name == "search_local_notices":
-        location    = args.get("location", "")
+        location = args.get("location", "")
         search_type = args.get("search_type", "all")
         print(f"[AGENT] Web search: {location} | type={search_type}")
         try:
             result = await search_local_notices(location, search_type=search_type)
         except BaseException as e:
-            msg = _unwrap_exception(e)
-            print(f"[AGENT] Web search error: {msg}")
-            result = f"(Web search failed: {msg})"
-        source = {"type": "web", "label": f"Web: {location[:60]}"}
-        return result, source
+            result = f"(Web search failed: {_unwrap_exception(e)})"
+        return result, {"type": "web", "label": f"Web: {location[:60]}"}
 
     return f"Unknown tool: {name}", {}
 
 
-# ── Agent Loop ──────────────────────────────────────────────────────────────
+# ── Step Tracking ──────────────────────────────────────────────────────────
+
+STEP_TYPE_MAP = {
+    "query_genie": "genie",
+    "get_swms": "document",
+    "query_weather": "weather",
+    "search_local_notices": "web",
+}
+
 
 def _emit_step(step: dict, steps: list, on_step=None):
-    """Append step to list and fire callback if provided."""
     steps.append(step)
     if on_step:
         try:
@@ -376,122 +373,112 @@ def _emit_step(step: dict, steps: list, on_step=None):
             pass
 
 
+def _emit_result_step(stype: str, result_text: str, all_steps: list, on_step):
+    if "(failed" in result_text.lower() or "(error" in result_text.lower() or "(unavailable" in result_text.lower():
+        _emit_step({"type": stype, "action": "error", "detail": result_text[:120]}, all_steps, on_step)
+    else:
+        row_count = result_text.count("\n|") if "|" in result_text else 0
+        if row_count > 1:
+            _emit_step({"type": stype, "action": "result", "detail": f"{row_count} rows returned"}, all_steps, on_step)
+        else:
+            _emit_step({"type": stype, "action": "result", "detail": "Results returned"}, all_steps, on_step)
+
+
+# ── Agent Loop ──────────────────────────────────────────────────────────────
+
 async def run_agent(user_message: str, history: list[dict], on_step=None) -> dict:
     """
-    Run the agentic loop.
+    Run the dual-agent loop with MLflow tracing.
 
-    Args:
-        user_message: The user's latest message.
-        history: Full OpenAI-format message history (including prior tool calls).
-        on_step: Optional callback(step_dict) called for each agent activity step.
-
-    Returns:
-        {response: str, sources: list, history: list, steps: list}
+    Supervisor (Haiku) selects tools → Writer (Claude Sonnet) composes response.
     """
-    try:
-        return await _run_agent_inner(user_message, history, None, on_step)
-    except Exception:
-        raise
+    if _mlflow_ready:
+        try:
+            with mlflow.start_span(name="crew_briefing_agent", span_type="AGENT") as root:
+                root.set_inputs({"user_message": user_message, "history_length": len(history)})
+                result = await _run_agent_inner(user_message, history, root, on_step)
+                root.set_outputs({"response_length": len(result.get("response", "")), "sources": result.get("sources", [])})
+                return result
+        except Exception as e:
+            print(f"[AGENT] Tracing wrapper error: {e}")
+    return await _run_agent_inner(user_message, history, None, on_step)
 
 
 async def _run_agent_inner(user_message: str, history: list[dict], root_span, on_step=None) -> dict:
-    """Inner agent loop with step tracking."""
+    """Dual-agent inner loop: Haiku supervisor + Claude writer."""
     all_steps = []
-
     _emit_step({"type": "agent", "action": "thinking", "detail": "Analysing your question and planning approach"}, all_steps, on_step)
 
     # ── Input guardrail ──
-    if root_span and _mlflow_ready:
+    passed, reason = _check_input_guardrail(user_message)
+    if _mlflow_ready and root_span:
         try:
-            guard_span = mlflow.start_span(name="guardrail_input", parent=root_span)
-            passed, reason = _check_input_guardrail(user_message)
-            guard_span.set_attributes({"passed": passed, "reason": reason})
-            guard_span.end()
-            if not passed:
-                result = {
-                    "response": "I can only help with field operations questions — crew briefings, work orders, safety procedures, and local conditions.",
-                    "sources": [],
-                    "history": history,
-                }
-                if root_span:
-                    root_span.set_outputs(result)
-                return result
-        except Exception as e:
-            print(f"[AGENT] Input guardrail span error: {e}")
-    else:
-        passed, reason = _check_input_guardrail(user_message)
-        if not passed:
-            return {
-                "response": "I can only help with field operations questions — crew briefings, work orders, safety procedures, and local conditions.",
-                "sources": [],
-                "history": history,
-            }
+            with mlflow.start_span(name="guardrail_input", span_type="GUARDRAIL") as gs:
+                gs.set_inputs({"user_message": user_message})
+                gs.set_outputs({"passed": passed, "reason": reason})
+        except Exception:
+            pass
 
-    messages = list(history) + [{"role": "user", "content": user_message}]
+    if not passed:
+        return {
+            "response": "I can only help with field operations questions — crew briefings, work orders, safety procedures, and local conditions.",
+            "sources": [],
+            "history": history,
+            "steps": all_steps,
+        }
+
+    # ── Phase 1: Supervisor (Haiku) — tool selection loop ──
+    # Build supervisor messages from history (only user/assistant text, not tool results)
+    supervisor_messages = list(history) + [{"role": "user", "content": user_message}]
     sources = []
-    max_iterations = 6
+    tool_results_for_writer = []  # Collect all tool results for the writer
+    max_supervisor_iterations = 4
 
-    for iteration in range(max_iterations):
-        print(f"[AGENT] Iteration {iteration + 1}, messages={len(messages)}")
+    for iteration in range(max_supervisor_iterations):
+        print(f"[SUPERVISOR] Iteration {iteration + 1}, messages={len(supervisor_messages)}")
+        _emit_step({"type": "agent", "action": "routing", "detail": f"Supervisor selecting tools (round {iteration + 1})"}, all_steps, on_step)
 
-        # ── LLM call with tracing ──
-        if root_span and _mlflow_ready:
+        # Call Haiku supervisor
+        if _mlflow_ready and root_span:
             try:
-                llm_span = mlflow.start_span(name=f"llm_call_{iteration}", parent=root_span)
-                llm_span.set_inputs({"message_count": len(messages)})
-            except Exception:
-                llm_span = None
+                with mlflow.start_span(name=f"supervisor_{iteration}", span_type="LLM") as sv_span:
+                    sv_span.set_inputs({"model": SUPERVISOR_MODEL, "message_count": len(supervisor_messages), "iteration": iteration})
+                    sv_response = await _call_llm(
+                        SUPERVISOR_MODEL, _build_supervisor_prompt(),
+                        supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
+                    )
+                    sv_span.set_outputs({
+                        "finish_reason": sv_response.get("finish_reason"),
+                        "tool_call_count": len(sv_response.get("tool_calls", [])),
+                    })
+            except Exception as e:
+                print(f"[SUPERVISOR] Span error: {e}")
+                sv_response = await _call_llm(
+                    SUPERVISOR_MODEL, _build_supervisor_prompt(),
+                    supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
+                )
         else:
-            llm_span = None
+            sv_response = await _call_llm(
+                SUPERVISOR_MODEL, _build_supervisor_prompt(),
+                supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
+            )
 
-        response = await _call_claude(messages, TOOLS)
+        tool_calls = sv_response.get("tool_calls", [])
+        sv_content = sv_response.get("content") or None
 
-        if llm_span:
-            try:
-                llm_span.set_outputs({
-                    "finish_reason": response.get("finish_reason"),
-                    "tool_call_count": len(response.get("tool_calls", [])),
-                    "has_content": bool(response.get("content")),
-                })
-                llm_span.end()
-            except Exception:
-                pass
-
-        tool_calls = response.get("tool_calls", [])
-        finish_reason = response.get("finish_reason", "stop")
-
-        content = response["content"] or None
-        assistant_msg: dict = {"role": "assistant", "content": content}
+        # Append supervisor response to its message history
+        sv_assistant_msg: dict = {"role": "assistant", "content": sv_content}
         if tool_calls:
-            assistant_msg["tool_calls"] = tool_calls
-        messages.append(assistant_msg)
+            sv_assistant_msg["tool_calls"] = tool_calls
+        supervisor_messages.append(sv_assistant_msg)
 
-        if not tool_calls or finish_reason == "stop":
-            final_text = response["content"] or "(No response)"
+        # If no tool calls, supervisor is done (or said "DONE")
+        if not tool_calls:
+            print(f"[SUPERVISOR] Done after {iteration + 1} iterations")
+            break
 
-            # ── Output guardrail ──
-            if root_span and _mlflow_ready:
-                try:
-                    out_span = mlflow.start_span(name="guardrail_output", parent=root_span)
-                    passed, reason = _check_output_guardrail(final_text)
-                    out_span.set_attributes({"passed": passed, "reason": reason})
-                    out_span.end()
-                except Exception:
-                    pass
-            else:
-                _check_output_guardrail(final_text)
-
-            _emit_step({"type": "agent", "action": "done", "detail": "Composing final response"}, all_steps, on_step)
-            return {
-                "response": final_text,
-                "sources": sources,
-                "history": messages,
-                "steps": all_steps,
-            }
-
-        # Execute all tool calls in parallel
-        import asyncio
-        tool_tasks = []
+        # Parse and execute tool calls in parallel
+        parsed_calls = []
         for tc in tool_calls:
             tc_id = tc.get("id", f"call_{iteration}")
             fn = tc.get("function", {})
@@ -500,10 +487,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 args = json.loads(fn.get("arguments", "{}"))
             except Exception:
                 args = {}
-            tool_tasks.append((tc_id, name, args))
-
-        # Execute tools with step tracking
-        STEP_TYPE_MAP = {"query_genie": "genie", "get_swms": "document", "query_weather": "weather", "search_local_notices": "web"}
+            parsed_calls.append((tc_id, name, args))
 
         async def _traced_tool(tc_name, tc_args):
             stype = STEP_TYPE_MAP.get(tc_name, "agent")
@@ -516,40 +500,102 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
             action_map = {"query_genie": "query", "get_swms": "search", "query_weather": "query", "search_local_notices": "search"}
             _emit_step({"type": stype, "action": action_map.get(tc_name, "query"), "detail": detail_map.get(tc_name, tc_name)}, all_steps, on_step)
 
+            if _mlflow_ready and root_span:
+                try:
+                    with mlflow.start_span(name=f"tool_{tc_name}", span_type="TOOL") as tool_span:
+                        tool_span.set_inputs({"tool": tc_name, "args": tc_args})
+                        result_text, source = await _execute_tool(tc_name, tc_args)
+                        tool_span.set_outputs({"result_length": len(result_text), "has_source": bool(source)})
+                        _emit_result_step(stype, result_text, all_steps, on_step)
+                        return result_text, source
+                except Exception as e:
+                    print(f"[AGENT] Tool span error for {tc_name}: {e}")
+
             result_text, source = await _execute_tool(tc_name, tc_args)
-
-            # Emit result step
-            if "(failed" in result_text.lower() or "(error" in result_text.lower() or "(unavailable" in result_text.lower():
-                _emit_step({"type": stype, "action": "error", "detail": result_text[:120]}, all_steps, on_step)
-            else:
-                # Count rows for table-like results, otherwise just say "Results returned"
-                row_count = result_text.count("\n|") if "|" in result_text else 0
-                if row_count > 1:
-                    _emit_step({"type": stype, "action": "result", "detail": f"{row_count} rows returned"}, all_steps, on_step)
-                else:
-                    _emit_step({"type": stype, "action": "result", "detail": "Results returned"}, all_steps, on_step)
-
+            _emit_result_step(stype, result_text, all_steps, on_step)
             return result_text, source
 
         results = await asyncio.gather(
-            *[_traced_tool(name, args) for _, name, args in tool_tasks]
+            *[_traced_tool(name, args) for _, name, args in parsed_calls]
         )
 
-        for (tc_id, _name, _args), (result, source) in zip(tool_tasks, results):
+        # Feed tool results back to supervisor + collect for writer
+        for (tc_id, tc_name, tc_args), (result_text, source) in zip(parsed_calls, results):
             if source:
                 sources.append(source)
-            messages.append({
+            supervisor_messages.append({
                 "role": "tool",
                 "tool_call_id": tc_id,
-                "content": result,
+                "content": result_text,
+            })
+            tool_results_for_writer.append({
+                "tool": tc_name,
+                "args": tc_args,
+                "result": result_text,
             })
 
-    _emit_step({"type": "agent", "action": "done", "detail": "Composing final response"}, all_steps, on_step)
+    # ── Phase 2: Writer (Claude Sonnet) — compose final response ──
+    _emit_step({"type": "agent", "action": "writing", "detail": "Composing final response"}, all_steps, on_step)
 
-    result = {
-        "response": "Agent loop exceeded maximum iterations.",
+    # Build writer context: user question + all tool results
+    tool_context_parts = []
+    for tr in tool_results_for_writer:
+        tool_label = tr["tool"]
+        if tr["args"]:
+            tool_label += f"({json.dumps(tr['args'], ensure_ascii=False)[:100]})"
+        tool_context_parts.append(f"### {tool_label}\n{tr['result']}")
+    tool_context = "\n\n---\n\n".join(tool_context_parts)
+
+    if tool_context:
+        writer_user_content = f"{user_message}\n\n---\n\nTOOL RESULTS:\n\n{tool_context}"
+    else:
+        writer_user_content = user_message
+
+    writer_messages = list(history) + [{"role": "user", "content": writer_user_content}]
+
+    if _mlflow_ready and root_span:
+        try:
+            with mlflow.start_span(name="writer", span_type="LLM") as wr_span:
+                wr_span.set_inputs({"model": WRITER_MODEL, "tool_results_count": len(tool_results_for_writer)})
+                writer_response = await _call_llm(
+                    WRITER_MODEL, _build_writer_prompt(),
+                    writer_messages, max_tokens=3000, temperature=0.2,
+                )
+                wr_span.set_outputs({"response_length": len(writer_response.get("content", ""))})
+        except Exception as e:
+            print(f"[WRITER] Span error: {e}")
+            writer_response = await _call_llm(
+                WRITER_MODEL, _build_writer_prompt(),
+                writer_messages, max_tokens=3000, temperature=0.2,
+            )
+    else:
+        writer_response = await _call_llm(
+            WRITER_MODEL, _build_writer_prompt(),
+            writer_messages, max_tokens=3000, temperature=0.2,
+        )
+
+    final_text = writer_response.get("content") or "(No response)"
+
+    # ── Output guardrail ──
+    out_passed, out_reason = _check_output_guardrail(final_text)
+    if _mlflow_ready and root_span:
+        try:
+            with mlflow.start_span(name="guardrail_output", span_type="GUARDRAIL") as out_span:
+                out_span.set_inputs({"response_length": len(final_text)})
+                out_span.set_outputs({"passed": out_passed, "reason": out_reason})
+        except Exception:
+            pass
+
+    # Build final history (user message + assistant response, no internal tool messages)
+    final_history = list(history) + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": final_text},
+    ]
+
+    _emit_step({"type": "agent", "action": "done", "detail": "Response complete"}, all_steps, on_step)
+    return {
+        "response": final_text,
         "sources": sources,
-        "history": messages,
+        "history": final_history,
         "steps": all_steps,
     }
-    return result
