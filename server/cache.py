@@ -55,6 +55,27 @@ def _extract_date(text: str) -> str | None:
     return None
 
 
+_GENIE_INTENTS = {
+    "work_orders": ["work order", "work orders", "scheduled", "scheduled work", "wo-"],
+    "overdue": ["overdue", "late", "behind schedule", "past due", "missed deadline"],
+    "pending": ["pending", "upcoming", "not started", "waiting"],
+    "completed": ["completed", "finished", "done", "closed"],
+    "assets": ["asset", "assets", "equipment", "transformer", "pole", "switchgear"],
+    "tasks": ["task", "tasks", "work task"],
+    "crew_schedule": ["crew", "schedule", "assignment", "working on", "what is", "what are"],
+    "projects": ["project", "projects", "investment", "budget"],
+}
+
+
+def _extract_genie_intent(text: str) -> str:
+    """Extract query intent from Genie question for cache grouping."""
+    t = text.lower()
+    for intent, keywords in _GENIE_INTENTS.items():
+        if any(kw in t for kw in keywords):
+            return intent
+    return "general"
+
+
 def _extract_location(text: str) -> str:
     """Extract and normalize location name."""
     t = text.lower().strip()
@@ -76,17 +97,17 @@ def _cache_key(tool_name: str, args: dict) -> str:
         # Same document → same result (full doc loading, not VS retrieval)
         normalized = {"tool": tool_name, "document_name": (args.get("document_name") or "default").lower().strip()}
     elif tool_name == "query_genie":
-        # Extract crew name and date from the question for stable cache keys
+        # Extract crew, date, and intent for stable cache keys
         q = args.get("question", "").lower().strip()
         crew = _extract_crew(q)
         date = _extract_date(q)
+        intent = _extract_genie_intent(q)
         if crew and date:
-            normalized = {"tool": tool_name, "crew": crew, "date": date}
+            normalized = {"tool": tool_name, "crew": crew, "date": date, "intent": intent}
         elif crew:
-            normalized = {"tool": tool_name, "crew": crew, "type": "general"}
+            normalized = {"tool": tool_name, "crew": crew, "intent": intent}
         else:
-            # Non-crew queries (e.g. "overdue work orders") — cache by lowercased question
-            normalized = {"tool": tool_name, "question": q}
+            normalized = {"tool": tool_name, "intent": intent, "question": q}
     elif tool_name == "query_weather":
         normalized = {"tool": tool_name, "location": _extract_location(args.get("location", "")), "date": args.get("date") or "current"}
     elif tool_name == "search_local_notices":
