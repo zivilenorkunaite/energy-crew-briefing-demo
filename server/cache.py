@@ -18,6 +18,51 @@ TOOL_TTLS = {
 
 DEFAULT_TTL = 600  # 10 min
 
+# Known crew names for extraction (lowercased)
+_CREWS = [
+    "grafton lines a", "grafton lines b", "coffs harbour lines", "coffs harbour cable",
+    "lismore lines", "port macquarie lines", "tamworth lines", "tamworth substation",
+    "armidale lines", "armidale inspection", "orange lines", "orange cable",
+    "dubbo lines", "dubbo emergency", "bathurst lines", "wagga wagga lines",
+    "wagga wagga inspection", "broken hill lines", "moree lines", "mudgee lines",
+    "inverell lines", "queanbeyan lines", "contractor downer", "contractor asplundh",
+    "contractor fulton hogan",
+]
+
+# Known depot locations (lowercased)
+_LOCATIONS = [
+    "grafton", "coffs harbour", "tamworth", "orange", "dubbo", "wagga wagga",
+    "armidale", "port macquarie", "bathurst", "broken hill", "lismore", "casino",
+    "glen innes", "inverell", "mudgee", "moree", "lightning ridge", "queanbeyan", "bega",
+]
+
+
+def _extract_crew(text: str) -> str | None:
+    """Extract crew name from query text."""
+    t = text.lower()
+    for crew in sorted(_CREWS, key=len, reverse=True):  # longest first
+        if crew in t:
+            return crew
+    return None
+
+
+def _extract_date(text: str) -> str | None:
+    """Extract date (YYYY-MM-DD) from query text."""
+    import re
+    m = re.search(r'(\d{4}-\d{2}-\d{2})', text)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _extract_location(text: str) -> str:
+    """Extract and normalize location name."""
+    t = text.lower().strip()
+    for loc in sorted(_LOCATIONS, key=len, reverse=True):
+        if loc in t:
+            return loc
+    return t
+
 
 def _cache_key(tool_name: str, args: dict) -> str:
     """Generate a deterministic cache key from tool name + normalized args.
@@ -31,11 +76,21 @@ def _cache_key(tool_name: str, args: dict) -> str:
         # Same document → same result (full doc loading, not VS retrieval)
         normalized = {"tool": tool_name, "document_name": (args.get("document_name") or "default").lower().strip()}
     elif tool_name == "query_genie":
-        normalized = {"tool": tool_name, "question": args.get("question", "").lower().strip()}
+        # Extract crew name and date from the question for stable cache keys
+        q = args.get("question", "").lower().strip()
+        crew = _extract_crew(q)
+        date = _extract_date(q)
+        if crew and date:
+            normalized = {"tool": tool_name, "crew": crew, "date": date}
+        elif crew:
+            normalized = {"tool": tool_name, "crew": crew, "type": "general"}
+        else:
+            # Non-crew queries (e.g. "overdue work orders") — cache by lowercased question
+            normalized = {"tool": tool_name, "question": q}
     elif tool_name == "query_weather":
-        normalized = {"tool": tool_name, "location": args.get("location", "").lower().strip(), "date": args.get("date") or "current"}
+        normalized = {"tool": tool_name, "location": _extract_location(args.get("location", "")), "date": args.get("date") or "current"}
     elif tool_name == "search_local_notices":
-        normalized = {"tool": tool_name, "location": args.get("location", "").lower().strip(), "search_type": args.get("search_type", "all")}
+        normalized = {"tool": tool_name, "location": _extract_location(args.get("location", ""))}
     else:
         normalized = {"tool": tool_name, "args": args}
 
