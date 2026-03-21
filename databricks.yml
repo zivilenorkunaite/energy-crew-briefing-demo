@@ -128,6 +128,8 @@ resources:
 
     cache-warm:
       name: ee-crew-briefing-cache-warm
+      run_as:
+        service_principal_name: "84fba77d-2b5d-40ef-94e4-a0c81b5af427"
       tags:
         demo: crew_briefing
       environments:
