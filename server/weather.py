@@ -143,11 +143,15 @@ async def _query_uc_function(station_name: str, forecast_date: str | None) -> st
         # Forecast: summarise work-hours data
         # Columns: station_name, observation_time, forecast_type, temperature, apparent_temperature,
         #          humidity, wind_speed_kmh, wind_gust_kmh, wind_direction, precipitation, weather_description, cloud_cover
-        temps = [float(r[3]) for r in rows if r[3] is not None]
-        winds = [float(r[6]) for r in rows if r[6] is not None]
-        gusts = [float(r[7]) for r in rows if r[7] is not None]
-        precip_total = sum(float(r[9]) for r in rows if r[9] is not None)
-        descs = [r[10] for r in rows if r[10]]
+        try:
+            temps = [float(r[3]) for r in rows if r[3] is not None]
+            winds = [float(r[6]) for r in rows if r[6] is not None]
+            gusts = [float(r[7]) for r in rows if r[7] is not None]
+            precip_total = sum(float(r[9]) for r in rows if r[9] is not None)
+            descs = [r[10] for r in rows if r[10]]
+        except (ValueError, IndexError, TypeError) as e:
+            print(f"[WEATHER] Error parsing forecast data: {e}")
+            return None
         worst_desc = max(set(descs), key=descs.count) if descs else "Unknown"
 
         lines = [
@@ -164,9 +168,13 @@ async def _query_uc_function(station_name: str, forecast_date: str | None) -> st
         )
     else:
         # Current: single row
-        r = rows[0]
-        temp, app_temp = r[3], r[4]
-        humidity, wind, gust = r[5], r[6], r[7]
+        try:
+            r = rows[0]
+            temp, app_temp = r[3], r[4]
+            humidity, wind, gust = r[5], r[6], r[7]
+        except (IndexError, TypeError) as e:
+            print(f"[WEATHER] Error parsing current data: {e}")
+            return None
         wind_dir, precip, desc = r[8], r[9], r[10] or ""
         cloud = r[11]
 
