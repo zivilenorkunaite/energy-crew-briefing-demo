@@ -255,6 +255,10 @@ if static_dir.exists():
         file_path = static_dir / path
         if file_path.is_file():
             return FileResponse(str(file_path))
+        # Try with .html extension (e.g. /settings → settings.html)
+        html_path = static_dir / f"{path}.html"
+        if html_path.is_file():
+            return FileResponse(str(html_path))
         return FileResponse(str(static_dir / "index.html"))
 else:
     @app.get("/")
