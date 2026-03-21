@@ -15,14 +15,18 @@ from server.swms import query_swms, DOCUMENT_NAMES
 from server.web_search import search_local_notices
 from server.weather import query_weather
 
-# AI Gateway URL — external endpoint, no PAT needed, OAuth works natively
+# AI Gateway URLs
 AI_GATEWAY_URL = os.environ.get(
     "AI_GATEWAY_URL",
     "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions",
 )
-# Model names — supervisor uses a fast model, writer uses the gateway route
+SUPERVISOR_GATEWAY_URL = os.environ.get(
+    "SUPERVISOR_GATEWAY_URL",
+    "https://1313663707993479.ai-gateway.cloud.databricks.com/cursor/v1/chat/completions",
+)
+# Model names — supervisor uses a fast gateway, writer uses the main gateway
 LLM_MODEL = os.environ.get("LLM_MODEL", "crew-briefing-llm")
-SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", "databricks-gemini-2-5-flash")
+SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", "crew-briefing-small-and-fast-llm")
 
 # MLflow experiment for tracing — UC-linked for trace sync
 MLFLOW_EXPERIMENT = os.environ.get(
@@ -304,10 +308,12 @@ async def _call_llm(
     max_tokens: int = 2500,
     temperature: float = 0.1,
     model: str | None = None,
+    gateway_url: str | None = None,
 ) -> dict[str, Any]:
-    """Call the AI Gateway (OpenAI chat completions format). Used for both supervisor and writer."""
+    """Call an AI Gateway (OpenAI chat completions format). Used for both supervisor and writer."""
     token = get_oauth_token()
     use_model = model or LLM_MODEL
+    use_url = gateway_url or AI_GATEWAY_URL
 
     payload = {
         "model": use_model,
@@ -325,7 +331,7 @@ async def _call_llm(
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            AI_GATEWAY_URL, json=payload, headers=headers,
+            use_url, json=payload, headers=headers,
             timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             if resp.status != 200:
@@ -505,7 +511,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                     sv_response = await _call_llm(
                         _build_supervisor_prompt(),
                         supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                        model=SUPERVISOR_MODEL,
+                        model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL, gateway_url=SUPERVISOR_GATEWAY_URL, gateway_url=SUPERVISOR_GATEWAY_URL,
                     )
                     sv_span.set_outputs({
                         "finish_reason": sv_response.get("finish_reason"),
@@ -516,13 +522,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 sv_response = await _call_llm(
                     _build_supervisor_prompt(),
                     supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                    model=SUPERVISOR_MODEL,
+                    model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL, gateway_url=SUPERVISOR_GATEWAY_URL,
                 )
         else:
             sv_response = await _call_llm(
                 _build_supervisor_prompt(),
                 supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                model=SUPERVISOR_MODEL,
+                model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL,
             )
 
         tool_calls = sv_response.get("tool_calls", [])

@@ -5,7 +5,9 @@ env:
   - name: LLM_MODEL
     value: 'crew-briefing-llm'
   - name: SUPERVISOR_MODEL
-    value: 'databricks-gemini-2-5-flash'
+    value: 'crew-briefing-small-and-fast-llm'
+  - name: SUPERVISOR_GATEWAY_URL
+    value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/cursor/v1/chat/completions'
   - name: SWMS_ENDPOINT
     value: 'swms-knowledge-assistant-v2'
   - name: TAVILY_API_KEY
@@ -27,4 +29,4 @@ env:
   - name: MLFLOW_EXPERIMENT
     value: '/Shared/ee-crew-briefing-traces-uc'
   - name: AGENT_VERSION
-    value: 'v3'
+    value: 'v4'
