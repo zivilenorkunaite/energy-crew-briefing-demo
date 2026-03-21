@@ -511,7 +511,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                     sv_response = await _call_llm(
                         _build_supervisor_prompt(),
                         supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                        model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL, gateway_url=SUPERVISOR_GATEWAY_URL, gateway_url=SUPERVISOR_GATEWAY_URL,
+                        model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL,
                     )
                     sv_span.set_outputs({
                         "finish_reason": sv_response.get("finish_reason"),
@@ -522,7 +522,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 sv_response = await _call_llm(
                     _build_supervisor_prompt(),
                     supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
-                    model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL, gateway_url=SUPERVISOR_GATEWAY_URL,
+                    model=SUPERVISOR_MODEL, gateway_url=SUPERVISOR_GATEWAY_URL,
                 )
         else:
             sv_response = await _call_llm(
