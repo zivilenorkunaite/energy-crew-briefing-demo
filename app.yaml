@@ -4,8 +4,10 @@ env:
     value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions'
   - name: LLM_MODEL
     value: 'databricks-claude-sonnet-4-6'
+  - name: SUPERVISOR_MODEL
+    value: 'databricks-gemini-2-5-flash'
   - name: SWMS_ENDPOINT
-    value: 'ka-654b18c3-endpoint'
+    value: 'swms-knowledge-assistant-v2'
   - name: TAVILY_API_KEY
     valueFrom: 'tavily-api-key'
   - name: PGHOST

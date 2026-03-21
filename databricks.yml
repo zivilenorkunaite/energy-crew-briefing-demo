@@ -40,8 +40,10 @@ resources:
             value: "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions"
           - name: LLM_MODEL
             value: databricks-claude-sonnet-4-6
+          - name: SUPERVISOR_MODEL
+            value: databricks-gemini-2-5-flash
           - name: SWMS_ENDPOINT
-            value: ka-654b18c3-endpoint
+            value: swms-knowledge-assistant-v2
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
           - name: PGHOST
@@ -56,10 +58,10 @@ resources:
             value: projects/ee-crew-briefing-as/branches/production/endpoints/primary
 
       resources:
-        - name: swms-ka
-          description: "SWMS Knowledge Assistant (KA endpoint)"
+        - name: swms-v2
+          description: "SWMS Knowledge Assistant v2 — lightweight RAG"
           serving_endpoint:
-            name: ka-654b18c3-endpoint
+            name: swms-knowledge-assistant-v2
             permission: CAN_QUERY
 
         - name: tavily-api-key
@@ -83,19 +85,17 @@ resources:
   jobs:
     bom-weather-refresh:
       name: ee-crew-briefing-bom-refresh
+      tags:
+        demo: crew_briefing
+      environments:
+        - environment_key: Default
+          spec:
+            client: "1"
       tasks:
         - task_key: refresh_bom
           notebook_task:
             notebook_path: setup/03_bom_refresh.py
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 0
-            spark_conf:
-              "spark.master": "local[*]"
-              "spark.databricks.cluster.profile": "singleNode"
-            custom_tags:
-              ResourceClass: "SingleNode"
+          environment_key: Default
       schedule:
         quartz_cron_expression: "0 0 * * * ?"
         timezone_id: "Australia/Sydney"

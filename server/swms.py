@@ -1,6 +1,7 @@
-"""SWMS Knowledge Assistant — calls the KA endpoint (agent/v1/responses format).
+"""SWMS Knowledge Assistant — calls the swms-knowledge-assistant-v2 endpoint.
 
-The KA endpoint handles Vector Search retrieval + LLM synthesis internally.
+The v2 endpoint does direct VS retrieval + AI Gateway LLM synthesis.
+Uses standard chat completions format (messages/choices).
 """
 
 import os
@@ -8,7 +9,7 @@ import aiohttp
 
 from server.config import get_oauth_token, get_workspace_host
 
-SWMS_ENDPOINT = os.environ.get("SWMS_ENDPOINT", "ka-654b18c3-endpoint")
+SWMS_ENDPOINT = os.environ.get("SWMS_ENDPOINT", "swms-knowledge-assistant-v2")
 
 # All known document names — used by the agent as filter hints
 DOCUMENT_NAMES = [
@@ -24,22 +25,20 @@ DOCUMENT_NAMES = [
 
 async def query_swms(query: str, document_name: str | None = None) -> str:
     """
-    Query the SWMS Knowledge Assistant (KA) endpoint.
+    Query the SWMS Knowledge Assistant v2 endpoint.
 
-    Uses the agent/v1/responses input format. The KA endpoint does VS retrieval
-    + LLM synthesis internally via the configured knowledge source.
+    Uses standard chat completions format (messages in, choices out).
     """
     host = get_workspace_host()
     token = get_oauth_token()
     url = f"{host}/serving-endpoints/{SWMS_ENDPOINT}/invocations"
 
-    # Build user message with optional document filter hint
     user_content = query
     if document_name:
         user_content = f"[Document: {document_name}] {query}"
 
     payload = {
-        "input": [
+        "messages": [
             {"role": "user", "content": user_content},
         ],
     }
@@ -51,22 +50,15 @@ async def query_swms(query: str, document_name: str | None = None) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.post(
             url, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=90),
+            timeout=aiohttp.ClientTimeout(total=60),
         ) as resp:
             if resp.status != 200:
                 error = await resp.text()
-                print(f"[SWMS] KA endpoint error {resp.status}: {error[:300]}")
+                print(f"[SWMS] Endpoint error {resp.status}: {error[:300]}")
                 return f"(SWMS endpoint error: {resp.status})"
             data = await resp.json()
 
-    # Parse agent/v1/responses format: output[].content[].text
-    texts = []
-    for item in data.get("output", []):
-        if item.get("type") == "message":
-            for block in item.get("content", []):
-                if block.get("type") == "output_text" and block.get("text"):
-                    texts.append(block["text"])
-
-    if texts:
-        return "".join(texts)
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if content:
+        return content
     return "(No SWMS response received)"

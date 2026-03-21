@@ -20,8 +20,9 @@ AI_GATEWAY_URL = os.environ.get(
     "AI_GATEWAY_URL",
     "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions",
 )
-# Model name passed in the payload
+# Model names — supervisor can use a faster model for tool routing
 LLM_MODEL = os.environ.get("LLM_MODEL", "databricks-claude-sonnet-4-6")
+SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", LLM_MODEL)
 
 # MLflow experiment for tracing
 MLFLOW_EXPERIMENT = os.environ.get(
@@ -76,8 +77,20 @@ Easter 2026 is 3-6 April (Good Friday to Easter Monday) — no planned work over
 Crews: {_CREW_LIST}.
 
 Rules:
-- For crew briefings: first call query_genie for work orders, then based on results call get_swms + query_weather + search_local_notices in parallel.
+- For crew briefings: Round 1 = query_genie for work orders. Round 2 = call get_swms + query_weather + search_local_notices ALL IN PARALLEL. Then say DONE.
+- get_swms: Call ONCE per unique SWMS document type. Map work types to documents:
+  - Planned Maintenance → SWMS-006 Planned Maintenance
+  - Asset Replacement, upgrades → SWMS-001 Asset Replacement
+  - Capital Works, new builds → SWMS-002 Capital Works
+  - Corrective/fault repair → SWMS-003 Corrective Maintenance
+  - Emergency → SWMS-004 Emergency Response
+  - Inspection, audit → SWMS-005 Inspection
+  - Vegetation/tree trimming → SWMS-007 Vegetation Management
+  NEVER call the same document twice. Maximum 2 get_swms calls per briefing.
+- query_weather: Call ONCE per location. Include the date parameter if a specific date was asked about.
+- search_local_notices: Call ONCE per location.
 - Query ONLY the specific date or range asked about. Do not expand ranges.
+- After Round 2, say DONE. Do not call more tools after getting SWMS + weather + web results.
 - Always call tools — never respond with text. If no tool is needed, respond with just "DONE"."""
 
 
@@ -264,12 +277,14 @@ async def _call_llm(
     tools: list[dict] | None = None,
     max_tokens: int = 2500,
     temperature: float = 0.1,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Call the AI Gateway (OpenAI chat completions format). Used for both supervisor and writer."""
     token = get_oauth_token()
+    use_model = model or LLM_MODEL
 
     payload = {
-        "model": LLM_MODEL,
+        "model": use_model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -289,7 +304,7 @@ async def _call_llm(
         ) as resp:
             if resp.status != 200:
                 error = await resp.text()
-                print(f"[LLM] Error {resp.status}: {error[:500]}")
+                print(f"[LLM:{use_model}] Error {resp.status}: {error[:500]}")
                 return {"content": f"[AI error {resp.status}: {error[:200]}]", "tool_calls": []}
             data = await resp.json()
 
@@ -433,7 +448,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
     supervisor_messages = list(history) + [{"role": "user", "content": user_message}]
     sources = []
     tool_results_for_writer = []  # Collect all tool results for the writer
-    max_supervisor_iterations = 4
+    max_supervisor_iterations = 3
 
     for iteration in range(max_supervisor_iterations):
         print(f"[SUPERVISOR] Iteration {iteration + 1}, messages={len(supervisor_messages)}")
@@ -443,10 +458,11 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
         if _mlflow_ready and root_span:
             try:
                 with mlflow.start_span(name=f"supervisor_{iteration}", span_type="LLM") as sv_span:
-                    sv_span.set_inputs({"model": LLM_MODEL, "message_count": len(supervisor_messages), "iteration": iteration})
+                    sv_span.set_inputs({"model": SUPERVISOR_MODEL, "message_count": len(supervisor_messages), "iteration": iteration})
                     sv_response = await _call_llm(
                         _build_supervisor_prompt(),
                         supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
+                        model=SUPERVISOR_MODEL,
                     )
                     sv_span.set_outputs({
                         "finish_reason": sv_response.get("finish_reason"),
@@ -457,11 +473,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 sv_response = await _call_llm(
                     _build_supervisor_prompt(),
                     supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
+                    model=SUPERVISOR_MODEL,
                 )
         else:
             sv_response = await _call_llm(
                 _build_supervisor_prompt(),
                 supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
+                model=SUPERVISOR_MODEL,
             )
 
         tool_calls = sv_response.get("tool_calls", [])

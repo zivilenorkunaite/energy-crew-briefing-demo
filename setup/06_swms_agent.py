@@ -1,138 +1,117 @@
-"""Deploy SWMS Knowledge Assistant as a standalone Databricks Agent endpoint.
+"""Deploy SWMS Knowledge Assistant v2 — lightweight RAG endpoint.
 
-Creates an MLflow model with Vector Search retriever + LLM synthesis,
-registers it in UC, and serves it as an independent endpoint.
+Direct Vector Search retrieval + AI Gateway LLM synthesis.
+No KA framework overhead. Target: 5-10s per query.
 
 Run with: python3 setup/06_swms_agent.py
 """
 
 import mlflow
 import os
+import yaml
 
 os.environ.setdefault("DATABRICKS_HOST", "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com")
 
 EXPERIMENT_PATH = "/Users/zivile.norkunaite@databricks.com/ee-crew-briefing-traces"
 MODEL_NAME = "zivile.essential_energy_wacs.swms_knowledge_assistant"
-ENDPOINT_NAME = "swms-knowledge-assistant"
+ENDPOINT_NAME = "swms-knowledge-assistant-v2"
 VS_INDEX = "zivile.essential_energy_wacs.swms_documents_vs_index"
-LLM_ENDPOINT = "crew-briefing-agent"
+AI_GATEWAY_URL = "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions"
+LLM_MODEL = "databricks-claude-sonnet-4-6"
 WORKSPACE_HOST = "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com"
 
 mlflow.set_experiment(EXPERIMENT_PATH)
 
-# ── Define the agent ──────────────────────────────────────────────────────
+# ── Model code ────────────────────────────────────────────────────────────
 
-AGENT_CODE = '''
+AGENT_CODE = r'''
 import mlflow
-import os
 import json
+import os
 import requests
 from mlflow.pyfunc import PythonModel
-from databricks.sdk import WorkspaceClient
 
 
-class SWMSKnowledgeAssistant(PythonModel):
-    """RAG agent: Vector Search retrieval + LLM synthesis for SWMS safety documents."""
+class SWMSKnowledgeAssistantV2(PythonModel):
+    """Lightweight RAG: Vector Search retrieval + AI Gateway LLM synthesis."""
 
-    SYSTEM_PROMPT = """You are the Essential Energy SWMS Knowledge Assistant. Your role is to answer \
-safety questions using ONLY the Safe Work Method Statement (SWMS) content provided below.
-
-Rules:
-- Answer ONLY from the provided SWMS content. Do not invent or assume safety requirements.
-- Cite the specific SWMS document (e.g. SWMS-001) and section title for every point.
-- Structure answers with clear headings: PPE, Hazards, Isolation Procedures, Competency, etc.
-- Use bullet points and tables for clarity — field crews need quick reference.
-- If the provided content does not cover the question, say so explicitly.
-- Reference Australian standards (AS/NZS, NENS-10) where they appear in the content."""
+    SYSTEM_PROMPT = (
+        "You are the Essential Energy SWMS Knowledge Assistant. Answer safety questions "
+        "using ONLY the SWMS content provided. Cite the specific SWMS document (e.g. SWMS-001) "
+        "and section title for every point. Structure with headings: PPE, Hazards, Isolation, "
+        "Competency. Use bullet points and tables. Reference Australian standards where they "
+        "appear in the content. If content doesn't cover the question, say so."
+    )
 
     def load_context(self, context):
         self.model_config = context.model_config
         self.vs_index = self.model_config.get("vs_index")
-        self.llm_endpoint = self.model_config.get("llm_endpoint")
+        self.ai_gateway_url = self.model_config.get("ai_gateway_url")
+        self.llm_model = self.model_config.get("llm_model", "databricks-claude-sonnet-4-6")
         self.workspace_host = self.model_config.get("workspace_host", "")
-
-        # Ensure DATABRICKS_HOST is set for the SDK
         if self.workspace_host:
             os.environ.setdefault("DATABRICKS_HOST", self.workspace_host)
 
-        self.w = WorkspaceClient()
+    def _get_token(self):
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            token = w.config.token
+            if token:
+                return token
+            headers = w.config.authenticate()
+            if headers and "Authorization" in headers:
+                return headers["Authorization"].replace("Bearer ", "")
+        except Exception:
+            pass
+        return os.environ.get("DATABRICKS_TOKEN", "")
 
-        # Resolve host — use config value, then SDK, then env
-        self.host = (
-            self.workspace_host
-            or self.w.config.host
-            or os.environ.get("DATABRICKS_HOST", "")
+    def _retrieve(self, query, num_results=5):
+        """Vector Search retrieval — direct REST call."""
+        token = self._get_token()
+        host = self.workspace_host or os.environ.get("DATABRICKS_HOST", "")
+        resp = requests.post(
+            f"{host}/api/2.0/vector-search/indexes/{self.vs_index}/query",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "query_text": query,
+                "columns": ["work_type", "section_title", "content", "document_name"],
+                "num_results": num_results,
+            },
+            timeout=15,
         )
-        if not self.host:
-            raise RuntimeError("No workspace host available — set workspace_host in model_config or DATABRICKS_HOST env var")
-
-    def _get_token(self) -> str:
-        """Get a fresh auth token."""
-        token = self.w.config.token
-        if token:
-            return token
-        headers = self.w.config.authenticate()
-        if headers and "Authorization" in headers:
-            return headers["Authorization"].replace("Bearer ", "")
-        raise RuntimeError("Could not obtain auth token")
-
-    def _retrieve(self, query: str, doc_filter: str = None) -> list[dict]:
-        """Retrieve relevant SWMS chunks via Vector Search."""
-        payload = {
-            "query_text": query,
-            "columns": ["work_type", "section_title", "content", "document_name"],
-            "num_results": 5,
-        }
-        if doc_filter:
-            payload["filters_json"] = json.dumps({"document_name": [doc_filter]})
-
-        url = f"{self.host}/api/2.0/vector-search/indexes/{self.vs_index}/query"
-        resp = requests.post(url, json=payload, headers={
-            "Authorization": f"Bearer {self._get_token()}",
-            "Content-Type": "application/json",
-        }, timeout=30)
         resp.raise_for_status()
-        data = resp.json()
+        rows = resp.json().get("result", {}).get("data_array", [])
+        return [
+            {"work_type": r[0], "section_title": r[1], "content": r[2], "document_name": r[3]}
+            for r in rows if len(r) >= 4 and r[2]
+        ]
 
-        rows = data.get("result", {}).get("data_array", [])
-        chunks = []
-        for row in rows:
-            if len(row) >= 4 and row[2]:
-                chunks.append({
-                    "work_type": row[0],
-                    "section_title": row[1],
-                    "content": row[2],
-                    "document_name": row[3],
-                })
-        return chunks
-
-    def _synthesise(self, query: str, chunks: list[dict]) -> str:
-        """Synthesise answer from retrieved chunks using LLM."""
-        context = "\\n\\n---\\n\\n".join(
-            f"[{c['document_name']} — {c['section_title']}]\\n{c['content']}"
-            for c in chunks
+    def _synthesise(self, query, chunks):
+        """LLM synthesis via AI Gateway — fast, no serving endpoint overhead."""
+        token = self._get_token()
+        context = "\n\n---\n\n".join(
+            f"[{c['document_name']} - {c['section_title']}]\n{c['content']}" for c in chunks
         )
-
-        from openai import OpenAI
-        client = OpenAI(
-            api_key=self._get_token(),
-            base_url=f"{self.host}/serving-endpoints",
+        resp = requests.post(
+            self.ai_gateway_url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "model": self.llm_model,
+                "messages": [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": f"SWMS CONTENT:\n\n{context}\n\n---\n\nQUESTION: {query}"},
+                ],
+                "max_tokens": 1500,
+                "temperature": 0.1,
+            },
+            timeout=30,
         )
-        response = client.chat.completions.create(
-            model=self.llm_endpoint,
-            messages=[
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": f"SWMS CONTENT:\\n\\n{context}\\n\\n---\\n\\nQUESTION: {query}"},
-            ],
-            max_tokens=1500,
-            temperature=0.1,
-        )
-        return response.choices[0].message.content
+        resp.raise_for_status()
+        return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
 
     def predict(self, context, model_input, params=None):
-        """Handle chat completions format."""
         import pandas as pd
-
         if isinstance(model_input, pd.DataFrame):
             messages = model_input.iloc[0].get("messages", [])
         elif isinstance(model_input, dict):
@@ -140,7 +119,6 @@ Rules:
         else:
             messages = []
 
-        # Extract query from last user message
         query = ""
         for msg in reversed(messages):
             if msg.get("role") == "user":
@@ -148,102 +126,88 @@ Rules:
                 break
 
         if not query:
-            return {"choices": [{"message": {"role": "assistant", "content": "Please ask a safety question."}}]}
+            return {"choices": [{"message": {"role": "assistant", "content": "Please ask a safety question."}, "finish_reason": "stop"}]}
 
-        # Retrieve
         chunks = self._retrieve(query)
         if not chunks:
-            answer = "No matching SWMS content found for your question."
+            answer = "No matching SWMS content found."
         else:
-            # Synthesise
             answer = self._synthesise(query, chunks)
             sources = sorted(set(c["document_name"] for c in chunks))
-            answer += f"\\n\\n*Sources: {', '.join(sources)}*"
+            answer += f"\n\n*Sources: {', '.join(sources)}*"
 
-        return {
-            "choices": [{
-                "message": {"role": "assistant", "content": answer},
-                "finish_reason": "stop",
-            }]
-        }
+        return {"choices": [{"message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}]}
 
 
-mlflow.models.set_model(SWMSKnowledgeAssistant())
+mlflow.models.set_model(SWMSKnowledgeAssistantV2())
 '''
 
-# ── Log and register the model ────────────────────────────────────────────
+# ── Log and register ──────────────────────────────────────────────────────
 
 print("=" * 60)
-print("Deploying SWMS Knowledge Assistant as Databricks Agent")
+print("Deploying SWMS Knowledge Assistant v2")
 print("=" * 60)
 
-# Write agent code to temp file
-agent_path = "/tmp/swms_agent_model.py"
+agent_path = "/tmp/swms_agent_v2.py"
 with open(agent_path, "w") as f:
     f.write(AGENT_CODE)
 
-# Model config — now includes workspace_host
 config = {
     "vs_index": VS_INDEX,
-    "llm_endpoint": LLM_ENDPOINT,
+    "ai_gateway_url": AI_GATEWAY_URL,
+    "llm_model": LLM_MODEL,
     "workspace_host": WORKSPACE_HOST,
 }
-config_path = "/tmp/swms_agent_config.yml"
-import yaml
+config_path = "/tmp/swms_agent_v2_config.yml"
 with open(config_path, "w") as f:
     yaml.dump(config, f)
 
-print(f"\n1. Logging model to MLflow...")
-with mlflow.start_run(run_name="swms_knowledge_assistant_v4") as run:
+print("\n1. Logging model...")
+with mlflow.start_run(run_name="swms_knowledge_assistant_v2") as run:
     model_info = mlflow.pyfunc.log_model(
         artifact_path="swms_agent",
         python_model=agent_path,
         model_config=config_path,
-        pip_requirements=[
-            "mlflow",
-            "databricks-sdk",
-            "openai",
-            "requests",
-        ],
-        input_example={
-            "messages": [
-                {"role": "user", "content": "What PPE is needed for transformer replacement?"}
-            ]
-        },
+        pip_requirements=["mlflow", "databricks-sdk", "requests", "pandas"],
+        input_example={"messages": [{"role": "user", "content": "What PPE for overhead line work?"}]},
     )
-    print(f"   Run ID: {run.info.run_id}")
-    print(f"   Model URI: {model_info.model_uri}")
+    print(f"   Run: {run.info.run_id}")
 
-print(f"\n2. Registering model as {MODEL_NAME}...")
-registered = mlflow.register_model(
-    model_uri=model_info.model_uri,
-    name=MODEL_NAME,
-)
+print(f"\n2. Registering as {MODEL_NAME}...")
+registered = mlflow.register_model(model_uri=model_info.model_uri, name=MODEL_NAME)
 print(f"   Version: {registered.version}")
 
-print(f"\n3. Updating serving endpoint: {ENDPOINT_NAME}...")
+print(f"\n3. Creating endpoint: {ENDPOINT_NAME}...")
 from databricks.sdk import WorkspaceClient
-w = WorkspaceClient()
+from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedEntityInput
 
+w = WorkspaceClient()
 try:
-    from databricks.sdk.service.serving import ServedEntityInput
+    w.serving_endpoints.get(ENDPOINT_NAME)
+    print("   Endpoint exists, updating...")
     w.serving_endpoints.update_config(
         name=ENDPOINT_NAME,
-        served_entities=[
-            ServedEntityInput(
+        served_entities=[ServedEntityInput(
+            entity_name=MODEL_NAME,
+            entity_version=str(registered.version),
+            workload_size="Small",
+            scale_to_zero_enabled=True,
+        )],
+    )
+except Exception:
+    print("   Creating new endpoint...")
+    w.serving_endpoints.create(
+        name=ENDPOINT_NAME,
+        config=EndpointCoreConfigInput(
+            served_entities=[ServedEntityInput(
                 entity_name=MODEL_NAME,
                 entity_version=str(registered.version),
                 workload_size="Small",
                 scale_to_zero_enabled=True,
-            )
-        ],
+            )],
+        ),
     )
-    print(f"   Endpoint updated to v{registered.version}")
-except Exception as e:
-    print(f"   Error updating endpoint: {e}")
 
 print(f"\n{'=' * 60}")
-print(f"SWMS Knowledge Assistant deployed!")
-print(f"  Model: {MODEL_NAME} v{registered.version}")
-print(f"  Endpoint: {ENDPOINT_NAME}")
+print(f"SWMS v2 deployed: {ENDPOINT_NAME} (v{registered.version})")
 print(f"{'=' * 60}")
