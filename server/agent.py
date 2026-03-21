@@ -412,7 +412,7 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
     result, source = await _execute_tool_uncached(name, args)
 
     # Cache successful results (not errors)
-    if not any(x in result.lower() for x in ["(failed", "(error", "(unavailable", "[ai error"]):
+    if not any(x in result.lower() for x in ["failed", "error", "unavailable", "timed out"]):
         await set_cached(name, args, result)
 
     return result, source
