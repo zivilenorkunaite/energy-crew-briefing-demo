@@ -72,7 +72,7 @@ async def _cache_warm_loop():
 
     async def _run_warm(trigger: str):
         """Run warming and record to history with live progress."""
-        nonlocal _warm_cancel
+        global _warm_cancel
         _warm_cancel = False
         start = _time.time()
         now_str = datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST")
