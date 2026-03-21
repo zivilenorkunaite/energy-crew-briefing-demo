@@ -48,13 +48,14 @@ AI-powered assistant for Essential Energy field supervisors and crew leaders. Pr
 
 ## LLM Routing
 
-| Role | AI Gateway Endpoint | Model | Purpose |
+| Role | AI Gateway Route | Current Model | Purpose |
 |------|-------|-------|---------|
 | **Supervisor** | `crew-briefing-small-and-fast-llm` | Gemini 2.5 Flash | Tool selection (~2s/call) |
-| **Writer** | `crew-briefing-llm` | Configurable via gateway | Final response composition (streaming) |
-| **SWMS synthesis** | `crew-briefing-llm` | Same as writer | Inside SWMS v2 endpoint |
+| **Writer** | `crew-briefing-llm` | Claude Haiku 4.5 | Final response composition (streaming) |
 
-**AI Gateway URL:** `https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions`
+Both routes go through the same AI Gateway. Models can be changed in the AI Gateway UI without redeploying the app.
+
+The SWMS v2 serving endpoint uses `crew-briefing-llm` internally for synthesis.
 
 ## Prompts
 
