@@ -24,16 +24,18 @@ AI_GATEWAY_URL = os.environ.get(
 LLM_MODEL = os.environ.get("LLM_MODEL", "databricks-claude-sonnet-4-6")
 SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", LLM_MODEL)
 
-# MLflow experiment for tracing
+# MLflow experiment for tracing — UC-linked for trace sync
 MLFLOW_EXPERIMENT = os.environ.get(
     "MLFLOW_EXPERIMENT",
-    "/Users/zivile.norkunaite@databricks.com/ee-crew-briefing-traces",
+    "/Shared/ee-crew-briefing-traces-uc",
 )
 
 _mlflow_ready = False
 mlflow = None
 try:
     import mlflow as _mlflow
+    _mlflow.set_tracking_uri("databricks")
+    _mlflow.set_registry_uri("databricks-uc")
     _mlflow.set_experiment(MLFLOW_EXPERIMENT)
     mlflow = _mlflow
     _mlflow_ready = True
@@ -42,7 +44,25 @@ except Exception as e:
     print(f"[AGENT] MLflow not available, tracing disabled: {e}")
 
 
-# ── System Prompts ──────────────────────────────────────────────────────────
+# ── System Prompts (loaded from prompts.yaml) ─────────────────────────────
+
+import yaml as _yaml
+from pathlib import Path as _Path
+
+def _load_prompts() -> dict:
+    """Load prompt templates from prompts.yaml."""
+    prompts_path = _Path(__file__).parent / "prompts.yaml"
+    if prompts_path.exists():
+        with open(prompts_path) as f:
+            data = _yaml.safe_load(f)
+        print(f"[AGENT] Loaded prompts v{data.get('version', '?')} from {prompts_path}")
+        return data
+    print("[AGENT] prompts.yaml not found, using defaults")
+    return {}
+
+_PROMPTS = _load_prompts()
+_PROMPT_VERSION = _PROMPTS.get("version", "unknown")
+
 
 def _get_sydney_time() -> tuple[str, str]:
     """Return (date_str, time_str) for Sydney."""
@@ -67,52 +87,17 @@ _CREW_LIST = (
 
 
 def _build_supervisor_prompt() -> str:
-    """Concise supervisor prompt — tool selection only, no prose."""
+    """Build supervisor prompt from template."""
     date_str, time_str = _get_sydney_time()
-    return f"""You are a tool-routing supervisor for Essential Energy field operations.
-Your ONLY job is to decide which tools to call and with what arguments. Never write a final answer.
-
-Current date/time in Sydney: {date_str}, {time_str}.
-Easter 2026 is 3-6 April (Good Friday to Easter Monday) — no planned work over Easter.
-Crews: {_CREW_LIST}.
-
-Rules:
-- For crew briefings: Round 1 = query_genie for work orders. Round 2 = call get_swms + query_weather + search_local_notices ALL IN PARALLEL. Then say DONE.
-- get_swms: Call ONCE per unique SWMS document type. Map work types to documents:
-  - Planned Maintenance → SWMS-006 Planned Maintenance
-  - Asset Replacement, upgrades → SWMS-001 Asset Replacement
-  - Capital Works, new builds → SWMS-002 Capital Works
-  - Corrective/fault repair → SWMS-003 Corrective Maintenance
-  - Emergency → SWMS-004 Emergency Response
-  - Inspection, audit → SWMS-005 Inspection
-  - Vegetation/tree trimming → SWMS-007 Vegetation Management
-  NEVER call the same document twice. Maximum 2 get_swms calls per briefing.
-- query_weather: Call ONCE per location. Include the date parameter if a specific date was asked about.
-- search_local_notices: Call ONCE per location.
-- Query ONLY the specific date or range asked about. Do not expand ranges.
-- After Round 2, say DONE. Do not call more tools after getting SWMS + weather + web results.
-- Always call tools — never respond with text. If no tool is needed, respond with just "DONE"."""
+    template = _PROMPTS.get("supervisor", {}).get("template", "You are a tool-routing supervisor.")
+    return template.format(date_str=date_str, time_str=time_str, crew_list=_CREW_LIST)
 
 
 def _build_writer_prompt() -> str:
-    """Writer prompt — compose final response from tool results."""
+    """Build writer prompt from template."""
     date_str, time_str = _get_sydney_time()
-    return f"""You are an AI field operations assistant for Essential Energy, an electricity \
-distribution network operator in NSW, Australia.
-
-You help field supervisors and crew leaders with crew briefings, work orders, safety procedures, \
-and local conditions.
-
-You are given a user question and the results from tool calls (Genie database queries, SWMS safety \
-documents, weather data, and local notices). Compose a clear, practical response.
-
-For crew briefings, structure as: Work Summary, Assets, Tasks, Weather Conditions, \
-Safety Requirements (PPE, Isolation, Hazards), Local Notices & Disruptions, Emergency Contacts.
-
-Keep responses practical — field crews need clarity, not prose. Use bullet points and tables. \
-Reference Australian standards (NENS-10, AS/NZS 3000) from the SWMS where relevant.
-
-Current date and time in Sydney: {date_str}, {time_str}."""
+    template = _PROMPTS.get("writer", {}).get("template", "You are a field operations assistant.")
+    return template.format(date_str=date_str, time_str=time_str)
 
 
 TOOLS = [
@@ -406,15 +391,32 @@ async def run_agent(user_message: str, history: list[dict], on_step=None) -> dic
     """
     Run the dual-agent loop with MLflow tracing.
 
-    Supervisor (Haiku) selects tools → Writer (Claude Sonnet) composes response.
+    Supervisor selects tools → Writer composes response.
     """
     if _mlflow_ready:
         try:
-            with mlflow.start_span(name="crew_briefing_agent", span_type="AGENT") as root:
+            # Use mlflow.trace context manager to create a proper exportable trace
+            trace = mlflow.start_span(name="crew_briefing_agent", span_type="AGENT")
+            root = trace.__enter__()
+            try:
                 root.set_inputs({"user_message": user_message, "history_length": len(history)})
+                root.set_attributes({
+                    "prompt_version": _PROMPT_VERSION,
+                    "supervisor_model": SUPERVISOR_MODEL,
+                    "writer_model": LLM_MODEL,
+                })
                 result = await _run_agent_inner(user_message, history, root, on_step)
                 root.set_outputs({"response_length": len(result.get("response", "")), "sources": result.get("sources", [])})
+                trace.__exit__(None, None, None)
+                # Flush traces to Databricks
+                try:
+                    mlflow.flush_trace_async_logging()
+                except Exception:
+                    pass
                 return result
+            except Exception as e:
+                trace.__exit__(type(e), e, e.__traceback__)
+                raise
         except Exception as e:
             print(f"[AGENT] Tracing wrapper error: {e}")
     return await _run_agent_inner(user_message, history, None, on_step)

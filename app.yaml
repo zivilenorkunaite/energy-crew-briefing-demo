@@ -20,3 +20,7 @@ env:
     value: 'require'
   - name: ENDPOINT_NAME
     value: 'projects/ee-crew-briefing-as/branches/production/endpoints/primary'
+  - name: MLFLOW_TRACING_DESTINATION
+    value: 'zivile.essential_energy_wacs'
+  - name: MLFLOW_EXPERIMENT
+    value: '/Shared/ee-crew-briefing-traces-uc'
