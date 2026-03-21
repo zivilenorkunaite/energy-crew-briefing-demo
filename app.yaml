@@ -1,9 +1,11 @@
 command: ['python', '-m', 'uvicorn', 'app:app', '--host', '0.0.0.0', '--port', '8000']
 env:
-  - name: SERVING_ENDPOINT
-    value: 'crew-briefing-agent'
-  - name: SUPERVISOR_ENDPOINT
-    value: 'crew-briefing-agent'
+  - name: AI_GATEWAY_URL
+    value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions'
+  - name: LLM_MODEL
+    value: 'databricks-claude-sonnet-4-6'
+  - name: SWMS_ENDPOINT
+    value: 'ka-654b18c3-endpoint'
   - name: TAVILY_API_KEY
     valueFrom: 'tavily-api-key'
   - name: PGHOST
@@ -16,5 +18,3 @@ env:
     value: 'require'
   - name: ENDPOINT_NAME
     value: 'projects/ee-crew-briefing-as/branches/production/endpoints/primary'
-  - name: SWMS_ENDPOINT
-    value: 'swms-knowledge-assistant-serving-endpoint'

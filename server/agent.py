@@ -15,10 +15,13 @@ from server.swms import query_swms, DOCUMENT_NAMES
 from server.web_search import search_local_notices
 from server.weather import query_weather
 
-# Writer model — Claude Sonnet via AI Gateway (with guardrails, rate limits, inference tables)
-WRITER_MODEL = os.environ.get("SERVING_ENDPOINT", "ee-crew-briefing-gateway")
-# Supervisor model — defaults to same gateway until Haiku permission is resolved
-SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_ENDPOINT", "ee-crew-briefing-gateway")
+# AI Gateway URL — external endpoint, no PAT needed, OAuth works natively
+AI_GATEWAY_URL = os.environ.get(
+    "AI_GATEWAY_URL",
+    "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions",
+)
+# Model name passed in the payload
+LLM_MODEL = os.environ.get("LLM_MODEL", "databricks-claude-sonnet-4-6")
 
 # MLflow experiment for tracing
 MLFLOW_EXPERIMENT = os.environ.get(
@@ -256,19 +259,17 @@ def _check_output_guardrail(response: str) -> tuple[bool, str]:
 # ── LLM Calls ──────────────────────────────────────────────────────────────
 
 async def _call_llm(
-    model: str,
     system_prompt: str,
     messages: list[dict],
     tools: list[dict] | None = None,
     max_tokens: int = 2500,
     temperature: float = 0.1,
 ) -> dict[str, Any]:
-    """Call a serving endpoint (OpenAI-compatible). Used for both supervisor and writer."""
-    host = get_workspace_host()
+    """Call the AI Gateway (OpenAI chat completions format). Used for both supervisor and writer."""
     token = get_oauth_token()
-    url = f"{host}/serving-endpoints/{model}/invocations"
 
     payload = {
+        "model": LLM_MODEL,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -283,12 +284,12 @@ async def _call_llm(
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            url, json=payload, headers=headers,
+            AI_GATEWAY_URL, json=payload, headers=headers,
             timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             if resp.status != 200:
                 error = await resp.text()
-                print(f"[LLM:{model}] Error {resp.status}: {error[:500]}")
+                print(f"[LLM] Error {resp.status}: {error[:500]}")
                 return {"content": f"[AI error {resp.status}: {error[:200]}]", "tool_calls": []}
             data = await resp.json()
 
@@ -442,9 +443,9 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
         if _mlflow_ready and root_span:
             try:
                 with mlflow.start_span(name=f"supervisor_{iteration}", span_type="LLM") as sv_span:
-                    sv_span.set_inputs({"model": SUPERVISOR_MODEL, "message_count": len(supervisor_messages), "iteration": iteration})
+                    sv_span.set_inputs({"model": LLM_MODEL, "message_count": len(supervisor_messages), "iteration": iteration})
                     sv_response = await _call_llm(
-                        SUPERVISOR_MODEL, _build_supervisor_prompt(),
+                        _build_supervisor_prompt(),
                         supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
                     )
                     sv_span.set_outputs({
@@ -454,12 +455,12 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
             except Exception as e:
                 print(f"[SUPERVISOR] Span error: {e}")
                 sv_response = await _call_llm(
-                    SUPERVISOR_MODEL, _build_supervisor_prompt(),
+                    _build_supervisor_prompt(),
                     supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
                 )
         else:
             sv_response = await _call_llm(
-                SUPERVISOR_MODEL, _build_supervisor_prompt(),
+                _build_supervisor_prompt(),
                 supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
             )
 
@@ -556,21 +557,21 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
     if _mlflow_ready and root_span:
         try:
             with mlflow.start_span(name="writer", span_type="LLM") as wr_span:
-                wr_span.set_inputs({"model": WRITER_MODEL, "tool_results_count": len(tool_results_for_writer)})
+                wr_span.set_inputs({"model": LLM_MODEL, "tool_results_count": len(tool_results_for_writer)})
                 writer_response = await _call_llm(
-                    WRITER_MODEL, _build_writer_prompt(),
+                    _build_writer_prompt(),
                     writer_messages, max_tokens=3000, temperature=0.2,
                 )
                 wr_span.set_outputs({"response_length": len(writer_response.get("content", ""))})
         except Exception as e:
             print(f"[WRITER] Span error: {e}")
             writer_response = await _call_llm(
-                WRITER_MODEL, _build_writer_prompt(),
+                _build_writer_prompt(),
                 writer_messages, max_tokens=3000, temperature=0.2,
             )
     else:
         writer_response = await _call_llm(
-            WRITER_MODEL, _build_writer_prompt(),
+            _build_writer_prompt(),
             writer_messages, max_tokens=3000, temperature=0.2,
         )
 
