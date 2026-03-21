@@ -817,6 +817,7 @@
         const decoder = new TextDecoder();
         let buffer = '';
         collectedSteps = [];
+        let streamedText = '';
 
         while (true) {
           const { done, value } = await reader.read();
@@ -841,11 +842,47 @@
                 const step = JSON.parse(data);
                 collectedSteps.push(step);
                 addLiveStep(step);
+              } else if (eventType === 'token') {
+                const tokenText = JSON.parse(data);
+                // First token — swap thinking for streaming bubble
+                if (!document.getElementById('streaming-bubble')) {
+                  removeThinking();
+                  const div = document.createElement('div');
+                  div.className = 'msg assistant';
+                  div.id = 'streaming-msg';
+                  div.innerHTML = `<div class="avatar av-ai">AI</div>
+                    <div class="msg-body">
+                      ${buildStepsHtml(collectedSteps)}
+                      <div class="bubble" id="streaming-bubble"></div>
+                    </div>`;
+                  document.getElementById('chat').appendChild(div);
+                  streamedText = '';
+                }
+                streamedText += tokenText;
+                document.getElementById('streaming-bubble').innerHTML = marked.parse(streamedText);
+                scrollDown();
               } else if (eventType === 'done') {
                 const result = JSON.parse(data);
-                removeThinking();
+                // If we were streaming, finalize the message
+                const streamMsg = document.getElementById('streaming-msg');
+                if (streamMsg) {
+                  streamMsg.removeAttribute('id');
+                  const bubble = streamMsg.querySelector('.bubble');
+                  if (bubble) {
+                    bubble.removeAttribute('id');
+                    bubble.innerHTML = marked.parse(result.response);
+                  }
+                  // Add source chips
+                  const body = streamMsg.querySelector('.msg-body');
+                  if (body && result.sources && result.sources.length) {
+                    body.insertAdjacentHTML('beforeend', _buildSourceChips(result.sources));
+                  }
+                } else {
+                  removeThinking();
+                  addAssistantMsg(result.response, result.sources, result.steps || collectedSteps);
+                }
                 agentHistory = result.history || [];
-                addAssistantMsg(result.response, result.sources, result.steps || collectedSteps);
+                displayMessages.push({ role: 'assistant', content: result.response, sources: result.sources || [], steps: result.steps || collectedSteps });
                 persistCurrentSession();
               } else if (eventType === 'error') {
                 const err = JSON.parse(data);

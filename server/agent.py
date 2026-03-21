@@ -349,6 +349,64 @@ async def _call_llm(
     }
 
 
+async def _call_llm_stream(
+    system_prompt: str,
+    messages: list[dict],
+    max_tokens: int = 3000,
+    temperature: float = 0.2,
+    model: str | None = None,
+    gateway_url: str | None = None,
+    on_token=None,
+) -> str:
+    """Streaming LLM call — yields tokens via on_token callback. Returns full text."""
+    token = get_oauth_token()
+    use_model = model or LLM_MODEL
+    use_url = gateway_url or AI_GATEWAY_URL
+
+    payload = {
+        "model": use_model,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    full_text = ""
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            use_url, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=120),
+        ) as resp:
+            if resp.status != 200:
+                error = await resp.text()
+                print(f"[LLM:{use_model}] Stream error {resp.status}: {error[:300]}")
+                return f"[AI error {resp.status}: {error[:200]}]"
+
+            async for line in resp.content:
+                line = line.decode("utf-8").strip()
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    text = delta.get("content", "")
+                    if text:
+                        full_text += text
+                        if on_token:
+                            on_token(text)
+                except (json.JSONDecodeError, IndexError):
+                    pass
+
+    return full_text
+
+
 # ── Tool Execution ─────────────────────────────────────────────────────────
 
 def _unwrap_exception(e: BaseException) -> str:
@@ -434,7 +492,7 @@ def _emit_result_step(stype: str, result_text: str, all_steps: list, on_step):
 
 # ── Agent Loop ──────────────────────────────────────────────────────────────
 
-async def run_agent(user_message: str, history: list[dict], on_step=None) -> dict:
+async def run_agent(user_message: str, history: list[dict], on_step=None, on_token=None) -> dict:
     """
     Run the dual-agent loop with MLflow tracing.
 
@@ -452,7 +510,7 @@ async def run_agent(user_message: str, history: list[dict], on_step=None) -> dic
                     "supervisor_model": SUPERVISOR_MODEL,
                     "writer_model": LLM_MODEL,
                 })
-                result = await _run_agent_inner(user_message, history, root, on_step)
+                result = await _run_agent_inner(user_message, history, root, on_step, on_token)
                 root.set_outputs({"response_length": len(result.get("response", "")), "sources": result.get("sources", [])})
                 trace.__exit__(None, None, None)
                 # Flush traces to Databricks
@@ -466,10 +524,10 @@ async def run_agent(user_message: str, history: list[dict], on_step=None) -> dic
                 raise
         except Exception as e:
             print(f"[AGENT] Tracing wrapper error: {e}")
-    return await _run_agent_inner(user_message, history, None, on_step)
+    return await _run_agent_inner(user_message, history, None, on_step, on_token)
 
 
-async def _run_agent_inner(user_message: str, history: list[dict], root_span, on_step=None) -> dict:
+async def _run_agent_inner(user_message: str, history: list[dict], root_span, on_step=None, on_token=None) -> dict:
     """Dual-agent inner loop: Haiku supervisor + Claude writer."""
     all_steps = []
     _emit_step({"type": "agent", "action": "thinking", "detail": "Analysing your question and planning approach"}, all_steps, on_step)
@@ -621,28 +679,32 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
 
     writer_messages = list(history) + [{"role": "user", "content": writer_user_content}]
 
+    # Stream writer response — tokens arrive incrementally via on_token callback
     if _mlflow_ready and root_span:
         try:
             with mlflow.start_span(name="writer", span_type="LLM") as wr_span:
                 wr_span.set_inputs({"model": LLM_MODEL, "tool_results_count": len(tool_results_for_writer)})
-                writer_response = await _call_llm(
+                final_text = await _call_llm_stream(
                     _build_writer_prompt(),
                     writer_messages, max_tokens=3000, temperature=0.2,
+                    on_token=on_token,
                 )
-                wr_span.set_outputs({"response_length": len(writer_response.get("content", ""))})
+                wr_span.set_outputs({"response_length": len(final_text)})
         except Exception as e:
             print(f"[WRITER] Span error: {e}")
-            writer_response = await _call_llm(
+            final_text = await _call_llm_stream(
                 _build_writer_prompt(),
                 writer_messages, max_tokens=3000, temperature=0.2,
+                on_token=on_token,
             )
     else:
-        writer_response = await _call_llm(
+        final_text = await _call_llm_stream(
             _build_writer_prompt(),
             writer_messages, max_tokens=3000, temperature=0.2,
+            on_token=on_token,
         )
 
-    final_text = writer_response.get("content") or "(No response)"
+    final_text = final_text or "(No response)"
 
     # ── Output guardrail ──
     out_passed, out_reason = _check_output_guardrail(final_text)

@@ -104,25 +104,36 @@ async def chat(req: ChatRequest):
 
     def on_step(step: dict):
         """Callback fired from agent for each activity step."""
-        event_queue.put_nowait(step)
+        event_queue.put_nowait(("step", step))
+
+    def on_token(text: str):
+        """Callback fired for each writer token."""
+        event_queue.put_nowait(("token", text))
 
     async def generate():
         agent_task = asyncio.create_task(
-            run_agent(req.message, req.history, on_step=on_step)
+            run_agent(req.message, req.history, on_step=on_step, on_token=on_token)
         )
 
-        # Stream step events as named SSE events
+        # Stream step + token events
         while not agent_task.done():
             try:
-                step = await asyncio.wait_for(event_queue.get(), timeout=0.3)
-                yield f"event: step\ndata: {json.dumps(step)}\n\n"
+                item = await asyncio.wait_for(event_queue.get(), timeout=0.3)
+                etype, data = item
+                if etype == "step":
+                    yield f"event: step\ndata: {json.dumps(data)}\n\n"
+                elif etype == "token":
+                    yield f"event: token\ndata: {json.dumps(data)}\n\n"
             except asyncio.TimeoutError:
                 pass
 
-        # Drain remaining steps
+        # Drain remaining events
         while not event_queue.empty():
-            step = event_queue.get_nowait()
-            yield f"event: step\ndata: {json.dumps(step)}\n\n"
+            etype, data = event_queue.get_nowait()
+            if etype == "step":
+                yield f"event: step\ndata: {json.dumps(data)}\n\n"
+            elif etype == "token":
+                yield f"event: token\ndata: {json.dumps(data)}\n\n"
 
         # Get final result
         try:
