@@ -60,11 +60,8 @@ resources:
             value: "01f111b05416164989106b097e2f7d21"
 
       resources:
-        - name: genie-field-ops
-          description: "Genie Room — Field Operations (WACS data)"
-          genie:
-            space_id: "01f111b05416164989106b097e2f7d21"
-            permission: CAN_RUN
+        # Genie Room (01f111b05416164989106b097e2f7d21) — CAN_RUN granted to SP separately
+        # (genie resource type not supported in bundle format)
 
         - name: swms-v2
           description: "SWMS Knowledge Assistant v2 — lightweight RAG"
