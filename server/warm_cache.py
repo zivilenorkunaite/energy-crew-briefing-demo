@@ -38,6 +38,7 @@ _LOCATION_CREWS = {
 _LOCATIONS = list(_LOCATION_CREWS.keys())
 DAYS_AHEAD = 10
 CONCURRENCY = 3
+GENIE_CONCURRENCY = 2  # Genie has stricter rate limits
 
 
 def _get_dates() -> list[str]:
@@ -59,6 +60,7 @@ async def warm_cache() -> AsyncGenerator[dict, None]:
     skipped = 0
     errors = 0
     sem = asyncio.Semaphore(CONCURRENCY)
+    genie_sem = asyncio.Semaphore(GENIE_CONCURRENCY)
 
     def prog(phase, detail=""):
         return {"done": done, "skipped": skipped, "errors": errors, "total": total, "phase": phase, "detail": detail}
@@ -133,7 +135,7 @@ async def warm_cache() -> AsyncGenerator[dict, None]:
 
     async def do_genie(crew, d):
         nonlocal done, skipped, errors
-        async with sem:
+        async with genie_sem:
             args = {"question": f"work orders for {crew} on {d}"}
             cached = await get_cached("query_genie", args)
             if cached:
@@ -155,7 +157,7 @@ async def warm_cache() -> AsyncGenerator[dict, None]:
                    for d in dates]
 
     all_coros = web_coros + genie_coros
-    for i in range(0, len(all_coros), 20):
+    for i in range(0, len(all_coros), 10):
         await asyncio.gather(*all_coros[i:i + 20])
         yield prog("web+genie", f"{done}/{total}")
 
