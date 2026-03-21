@@ -13,7 +13,7 @@ TOOL_TTLS = {
     "get_swms": 86400,           # 24h — SWMS docs don't change
     "query_genie": 7200,          # 2h — work orders change daily
     "search_local_notices": 7200, # 2h — notices change slowly
-    "query_weather": 1800,       # 30min — weather refreshes hourly
+    "query_weather": 7200,       # 2h — weather refreshes hourly
 }
 
 DEFAULT_TTL = 600  # 10 min
