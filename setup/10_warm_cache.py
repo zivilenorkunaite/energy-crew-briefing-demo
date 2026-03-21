@@ -1,7 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Cache Warming Job
-# MAGIC Calls the app's `/api/cache/warm` endpoint and monitors progress.
+# MAGIC Calls the app's `/api/cache/warm` endpoint and monitors cache growth
+# MAGIC by querying the Lakebase cache table directly.
 # MAGIC Restarts warming if cache stops growing. Exits when 80% full or 15min elapsed.
 # MAGIC Scheduled at 6am + 6pm AEST via DAB job.
 
@@ -15,67 +16,80 @@ host = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl(
 notebook_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None)
 
 APP_URL = "https://ee-crew-briefing-1313663707993479.aws.databricksapps.com"
+LAKEBASE_HOST = "ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com"
+ENDPOINT_NAME = "projects/ee-crew-briefing-as/branches/production/endpoints/primary"
 
-# The app proxy needs a workspace-scoped token — create a short-lived PAT
-pat_resp = requests.post(
-    f"{host}/api/2.0/token/create",
-    headers={"Authorization": f"Bearer {notebook_token}", "Content-Type": "application/json"},
-    json={"comment": "cache-warm-job", "lifetime_seconds": 1800},
-).json()
-app_token = pat_resp.get("token_value", notebook_token)
-print(f"App token: {'PAT' if pat_resp.get('token_value') else 'notebook'} ({len(app_token)} chars)")
-
-HEADERS = {"Authorization": f"Bearer {app_token}"}
-
-# Expected cache entries (from warm_cache.py)
+# Expected cache entries
 EXPECTED = {
-    "get_swms": 7,               # 7 SWMS documents
-    "query_weather": 209,        # 19 locations × 11 days
-    "search_local_notices": 19,  # 19 locations
-    "query_genie": 231,          # ~21 crews × 11 days
+    "get_swms": 7,
+    "query_weather": 209,
+    "search_local_notices": 19,
+    "query_genie": 231,
 }
 TOTAL_EXPECTED = sum(EXPECTED.values())
 TARGET_PCT = 0.80
 TARGET_COUNT = int(TOTAL_EXPECTED * TARGET_PCT)
 MAX_MINUTES = 15
 
-print(f"Expected: {TOTAL_EXPECTED} entries, target: {TARGET_COUNT} ({TARGET_PCT:.0%})")
-print(f"Max time: {MAX_MINUTES} min")
+print(f"Expected: {TOTAL_EXPECTED} entries, target: {TARGET_COUNT} ({TARGET_PCT:.0%}), max: {MAX_MINUTES} min")
 
 # COMMAND ----------
 
-def get_cache_count():
-    """Get current total cache entries from the app."""
+# Get Lakebase credential for direct DB queries
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+db_cred = w.postgres.generate_database_credential(endpoint=ENDPOINT_NAME)
+db_token = db_cred.token
+
+import psycopg2
+def get_cache_stats():
+    """Query Lakebase cache table directly."""
     try:
-        resp = requests.get(f"{APP_URL}/api/cache/stats", headers=HEADERS, timeout=10)
-        stats = resp.json().get("stats", [])
-        total = sum(s.get("count", 0) for s in stats)
-        per_tool = {s["tool_name"]: s["count"] for s in stats}
+        conn = psycopg2.connect(
+            host=LAKEBASE_HOST, port=5432, dbname="databricks_postgres",
+            user=spark.conf.get("spark.databricks.service.principal.id", "zivile.norkunaite@databricks.com"),
+            password=db_token, sslmode="require",
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT tool_name, COUNT(*) FROM tool_cache GROUP BY tool_name")
+        per_tool = {row[0]: row[1] for row in cur.fetchall()}
+        total = sum(per_tool.values())
+        cur.close()
+        conn.close()
         return total, per_tool
     except Exception as e:
-        print(f"  Error checking stats: {e}")
+        print(f"  DB query error: {e}")
         return 0, {}
 
+# Test connection
+total, per_tool = get_cache_stats()
+print(f"Current cache: {total} entries")
+for t, c in per_tool.items():
+    print(f"  {t}: {c}")
+
+# COMMAND ----------
 
 def start_warming():
-    """Fire the warm endpoint (non-blocking — we just start it and monitor via stats)."""
+    """Fire the warm endpoint. Uses notebook token — may not auth but the SSE stream starts."""
     try:
-        # Start the SSE stream but don't block on it — read a few lines then let it run
-        resp = requests.post(
-            f"{APP_URL}/api/cache/warm",
-            headers=HEADERS,
-            stream=True,
-            timeout=10,
-        )
-        # Read first line to confirm it started
-        for line in resp.iter_lines(decode_unicode=True):
-            if line and line.startswith("data: "):
-                d = json.loads(line[6:])
-                print(f"  Warming started: {d.get('phase', '?')}")
-                break
-        # Close the stream — warming continues server-side
-        resp.close()
-        return True
+        # Try with notebook token first, then fall back
+        for token in [notebook_token]:
+            resp = requests.post(
+                f"{APP_URL}/api/cache/warm",
+                headers={"Authorization": f"Bearer {token}"},
+                stream=True, timeout=10,
+            )
+            if resp.status_code == 200:
+                for line in resp.iter_lines(decode_unicode=True):
+                    if line and line.startswith("data: "):
+                        d = json.loads(line[6:])
+                        print(f"  Warming started: {d.get('phase', '?')}")
+                        break
+                resp.close()
+                return True
+            resp.close()
+        print("  Could not start warming via API — trigger manually from Settings page")
+        return False
     except Exception as e:
         print(f"  Error starting warm: {e}")
         return False
@@ -85,44 +99,43 @@ def start_warming():
 start_time = time.time()
 prev_count = 0
 stall_rounds = 0
-warming_active = False
 
-print(f"\nStarting cache monitoring loop...")
+# Try to start warming
+print("Starting cache warm...")
+started = start_warming()
+if not started:
+    print("WARNING: Could not trigger warming via API. Monitoring only.")
+    print("Please start warming from the Settings page: /settings")
+
+print(f"\nMonitoring cache growth...")
 
 while True:
     elapsed_min = (time.time() - start_time) / 60
 
-    # Check time limit
     if elapsed_min >= MAX_MINUTES:
         print(f"\n  Time limit reached ({MAX_MINUTES} min)")
         break
 
-    # Check current cache status
-    total, per_tool = get_cache_count()
+    total, per_tool = get_cache_stats()
     pct = total / TOTAL_EXPECTED * 100 if TOTAL_EXPECTED > 0 else 0
-
-    status_parts = [f"{tool}: {per_tool.get(tool, 0)}/{exp}" for tool, exp in EXPECTED.items()]
+    status_parts = [f"{t}: {per_tool.get(t, 0)}/{e}" for t, e in EXPECTED.items()]
     print(f"  [{elapsed_min:4.1f}min] {total}/{TOTAL_EXPECTED} ({pct:.0f}%) — {', '.join(status_parts)}")
 
-    # Check if target reached
     if total >= TARGET_COUNT:
         print(f"\n  Target reached: {total}/{TARGET_COUNT} ({pct:.0f}%)")
         break
 
-    # Check if cache is growing
     if total > prev_count:
-        # Growing — sleep and check again
         stall_rounds = 0
         prev_count = total
-        print(f"    Cache growing, sleeping 60s...")
+        print(f"    Growing, sleeping 60s...")
         time.sleep(60)
     else:
-        # Stalled — restart warming
         stall_rounds += 1
         if stall_rounds >= 3:
             print(f"    Stalled for {stall_rounds} rounds, giving up")
             break
-        print(f"    Cache not growing (stall {stall_rounds}/3), restarting warm...")
+        print(f"    Not growing (stall {stall_rounds}/3), restarting warm...")
         start_warming()
         prev_count = total
         time.sleep(60)
@@ -130,7 +143,7 @@ while True:
 # COMMAND ----------
 
 # Final summary
-total, per_tool = get_cache_count()
+total, per_tool = get_cache_stats()
 pct = total / TOTAL_EXPECTED * 100 if TOTAL_EXPECTED > 0 else 0
 elapsed = (time.time() - start_time) / 60
 
@@ -142,15 +155,6 @@ for tool, exp in EXPECTED.items():
     status = "OK" if actual >= exp * TARGET_PCT else "LOW"
     print(f"  {tool:25s}: {actual:4d}/{exp} ({status})")
 print(f"{'='*60}")
-
-# Cleanup: revoke the temporary PAT
-if pat_resp.get("token_info", {}).get("token_id"):
-    requests.post(
-        f"{host}/api/2.0/token/delete",
-        headers={"Authorization": f"Bearer {notebook_token}", "Content-Type": "application/json"},
-        json={"token_id": pat_resp["token_info"]["token_id"]},
-    )
-    print("Temporary PAT revoked")
 
 if total < TARGET_COUNT * 0.5:
     raise Exception(f"Cache critically low: {total}/{TARGET_COUNT} — check app health")
