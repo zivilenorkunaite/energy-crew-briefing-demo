@@ -88,10 +88,7 @@ class IframeHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(IframeHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://ee-crew-briefing-1313663707993479.aws.databricksapps.com",
-        "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com",
-    ],
+    allow_origin_regex=r"https://.*\.(databricks\.com|databricksapps\.com)",
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
