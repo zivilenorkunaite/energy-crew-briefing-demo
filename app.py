@@ -32,10 +32,65 @@ from server.agent import run_agent
 
 _token_refresh_task: Optional[asyncio.Task] = None
 _cache_warm_task: Optional[asyncio.Task] = None
-_warm_history: list = []  # [{trigger, start, end, duration_s, before, after, skipped, errors, status, phase, done, total}]
 _warm_cancel = False
 MAX_WARM_HISTORY = 20
 _run_warm_ref = None  # set in _cache_warm_loop
+
+
+async def _warm_history_insert(record: dict) -> int:
+    """Insert a warm history record, return its ID."""
+    from server.db import db
+    try:
+        row_id = await db.fetchval(
+            """INSERT INTO warm_history (trigger, start_time, status, before_count, phase, done, total, skipped, errors)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id""",
+            record.get("trigger"), record.get("start"), record.get("status", "running"),
+            record.get("before", 0), record.get("phase", "starting"),
+            record.get("done", 0), record.get("total", 0),
+            record.get("skipped", 0), record.get("errors", 0),
+        )
+        return row_id
+    except Exception as e:
+        print(f"[WARM] History insert error: {e}")
+        return 0
+
+
+async def _warm_history_update(row_id: int, record: dict):
+    """Update a warm history record."""
+    from server.db import db
+    try:
+        await db.execute(
+            """UPDATE warm_history SET status=$1, phase=$2, done=$3, total=$4,
+               skipped=$5, errors=$6, end_time=$7, duration_s=$8,
+               after_count=$9 WHERE id=$10""",
+            record.get("status"), record.get("phase"), record.get("done", 0),
+            record.get("total", 0), record.get("skipped", 0), record.get("errors", 0),
+            record.get("end"), record.get("duration_s"), record.get("after"),
+            row_id,
+        )
+    except Exception as e:
+        print(f"[WARM] History update error: {e}")
+
+
+async def _warm_history_list() -> list[dict]:
+    """Get recent warm history from Lakebase."""
+    from server.db import db
+    try:
+        rows = await db.fetch(
+            f"SELECT * FROM warm_history ORDER BY id DESC LIMIT {MAX_WARM_HISTORY}"
+        )
+        return [
+            {
+                "trigger": r["trigger"], "start": r["start_time"], "end": r["end_time"],
+                "duration_s": r["duration_s"], "before": r["before_count"], "after": r["after_count"],
+                "done": r["done"], "total": r["total"], "skipped": r["skipped"],
+                "errors": r["errors"], "phase": r["phase"], "status": r["status"],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[WARM] History list error: {e}")
+        return []
 
 
 async def _refresh_loop():
@@ -72,7 +127,7 @@ async def _cache_warm_loop():
     import time as _time
 
     async def _run_warm(trigger: str):
-        """Run warming and record to history with live progress."""
+        """Run warming and record to Lakebase history."""
         global _warm_cancel, _run_warm_ref
         _warm_cancel = False
         start = _time.time()
@@ -86,19 +141,20 @@ async def _cache_warm_loop():
             "status": "running", "phase": "starting", "done": 0, "total": 0,
             "skipped": 0, "errors": 0, "after": None, "duration_s": None, "end": None,
         }
-        _warm_history.insert(0, record)
-        if len(_warm_history) > MAX_WARM_HISTORY:
-            _warm_history.pop()
+        row_id = await _warm_history_insert(record)
 
         try:
             async for progress in warm_cache():
-                # Update live progress in the record
                 record["phase"] = progress.get("phase", "")
                 record["done"] = progress.get("done", 0)
                 record["total"] = progress.get("total", 0)
                 record["skipped"] = progress.get("skipped", 0)
                 record["errors"] = progress.get("errors", 0)
                 record["duration_s"] = round(_time.time() - start, 1)
+
+                # Update DB every ~10% or on phase change
+                if row_id:
+                    await _warm_history_update(row_id, record)
 
                 if progress.get("phase") == "done":
                     print(f"[WARM] {trigger}: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
@@ -110,6 +166,8 @@ async def _cache_warm_loop():
         except Exception as e:
             record["status"] = f"error: {e}"
             print(f"[WARM] {trigger} error: {e}")
+            if row_id:
+                await _warm_history_update(row_id, record)
             return
 
         stats_after = await get_cache_stats()
@@ -123,6 +181,8 @@ async def _cache_warm_loop():
         })
         if record["status"] == "running":
             record["status"] = "done"
+        if row_id:
+            await _warm_history_update(row_id, record)
         print(f"[WARM] {trigger}: {before_total} → {after_total} in {elapsed}s")
 
     from server.settings import get_bool
@@ -152,14 +212,17 @@ async def _cache_warm_loop():
 
                 if pct >= MIN_CACHE_PCT:
                     print(f"[WARM] Cache at {pct:.0%} ({total}/{EXPECTED_TOTAL}) — skipping")
-                    _warm_history.insert(0, {
+                    skip_record = {
                         "trigger": f"scheduled {current_hour}:00",
                         "start": now.strftime("%Y-%m-%d %H:%M AEST"),
                         "status": f"skipped ({pct:.0%} full)",
-                        "before": total, "after": total, "duration_s": 0, "skipped": 0, "errors": 0,
-                    })
-                    if len(_warm_history) > MAX_WARM_HISTORY:
-                        _warm_history.pop()
+                        "before": total, "after": total,
+                    }
+                    row_id = await _warm_history_insert(skip_record)
+                    if row_id:
+                        skip_record["end"] = skip_record["start"]
+                        skip_record["duration_s"] = 0
+                        await _warm_history_update(row_id, skip_record)
                     continue
 
                 await _run_warm(f"scheduled {current_hour}:00")
@@ -371,7 +434,7 @@ async def clear_cache_all():
 
 @app.get("/api/cache/warm/history")
 async def warm_history():
-    return {"history": _warm_history}
+    return {"history": await _warm_history_list()}
 
 
 @app.post("/api/cache/warm/stop")
@@ -399,7 +462,8 @@ async def set_setting_endpoint(key: str, req: dict = {}):
 async def warm_cache_endpoint():
     """Trigger cache warming as a background task."""
     # Check if already running
-    if _warm_history and _warm_history[0].get("status") == "running":
+    history = await _warm_history_list()
+    if history and history[0].get("status") == "running":
         return {"ok": False, "error": "Warming already in progress"}
     # Run _run_warm in background (it's defined inside _cache_warm_loop — call it via the shared reference)
     asyncio.create_task(_run_warm_ref("manual"))
