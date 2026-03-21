@@ -83,7 +83,10 @@ for t, c in per_tool.items():
     print(f"  {t}: {c}")
 
 if total == 0 and not per_tool:
-    raise Exception("Cannot read cache stats — auth may have failed")
+    # Debug: show raw response
+    debug_resp = requests.get(f"{APP_URL}/api/cache/stats", headers=HEADERS, timeout=10)
+    print(f"Stats response: {debug_resp.status_code} — {debug_resp.text[:500]}")
+    raise Exception(f"Cannot read cache stats — got status {debug_resp.status_code}: {debug_resp.text[:200]}")
 
 # COMMAND ----------
 
