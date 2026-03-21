@@ -61,7 +61,7 @@ url = (
     f"wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,precipitation,cloud_cover"
     f"&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,"
     f"wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,precipitation,cloud_cover"
-    f"&forecast_days=7&timezone=Australia/Sydney&wind_speed_unit=kmh"
+    f"&forecast_days=14&timezone=Australia/Sydney&wind_speed_unit=kmh"
 )
 
 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})

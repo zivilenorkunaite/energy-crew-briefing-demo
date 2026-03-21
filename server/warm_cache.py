@@ -29,10 +29,14 @@ _LOCATION_CREWS = {
     "mudgee": ["Mudgee Lines"],
     "moree": ["Moree Lines"],
     "queanbeyan": ["Queanbeyan Lines"],
+    "bega": [],
+    "casino": [],
+    "glen innes": [],
+    "lightning ridge": [],
 }
 
 _LOCATIONS = list(_LOCATION_CREWS.keys())
-DAYS_AHEAD = 10
+DAYS_AHEAD = 14
 CONCURRENCY = 3
 
 
