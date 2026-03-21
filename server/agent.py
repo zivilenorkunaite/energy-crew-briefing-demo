@@ -293,6 +293,8 @@ async def _call_llm(
 ) -> dict[str, Any]:
     """Call an AI Gateway (OpenAI chat completions format). Used for both supervisor and writer."""
     token = get_oauth_token()
+    if not token:
+        return {"content": "[Auth error: no OAuth token available]", "tool_calls": [], "finish_reason": "stop"}
     use_model = model or LLM_MODEL
     use_url = gateway_url or AI_GATEWAY_URL
 
@@ -342,6 +344,8 @@ async def _call_llm_stream(
 ) -> str:
     """Streaming LLM call — yields tokens via on_token callback. Returns full text."""
     token = get_oauth_token()
+    if not token:
+        return "[Auth error: no OAuth token available]"
     use_model = model or LLM_MODEL
     use_url = gateway_url or AI_GATEWAY_URL
 
