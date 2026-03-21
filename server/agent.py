@@ -20,9 +20,9 @@ AI_GATEWAY_URL = os.environ.get(
     "AI_GATEWAY_URL",
     "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions",
 )
-# Model names — supervisor can use a faster model for tool routing
-LLM_MODEL = os.environ.get("LLM_MODEL", "databricks-claude-sonnet-4-6")
-SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", LLM_MODEL)
+# Model names — supervisor uses a fast model, writer uses the gateway route
+LLM_MODEL = os.environ.get("LLM_MODEL", "crew-briefing-llm")
+SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", "databricks-gemini-2-5-flash")
 
 # MLflow experiment for tracing — UC-linked for trace sync
 MLFLOW_EXPERIMENT = os.environ.get(

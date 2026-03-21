@@ -3,7 +3,7 @@ env:
   - name: AI_GATEWAY_URL
     value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions'
   - name: LLM_MODEL
-    value: 'databricks-claude-sonnet-4-6'
+    value: 'crew-briefing-llm'
   - name: SUPERVISOR_MODEL
     value: 'databricks-gemini-2-5-flash'
   - name: SWMS_ENDPOINT
