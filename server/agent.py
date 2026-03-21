@@ -306,7 +306,7 @@ async def _call_llm(
     messages: list[dict],
     tools: list[dict] | None = None,
     max_tokens: int = 2500,
-    temperature: float = 0.1,
+    temperature: float | None = 0.1,
     model: str | None = None,
     gateway_url: str | None = None,
 ) -> dict[str, Any]:
@@ -319,8 +319,9 @@ async def _call_llm(
         "model": use_model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     if tools:
         payload["tools"] = tools
 
@@ -353,7 +354,7 @@ async def _call_llm_stream(
     system_prompt: str,
     messages: list[dict],
     max_tokens: int = 3000,
-    temperature: float = 0.2,
+    temperature: float | None = None,
     model: str | None = None,
     gateway_url: str | None = None,
     on_token=None,
@@ -367,9 +368,10 @@ async def _call_llm_stream(
         "model": use_model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "stream": True,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -720,7 +722,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 wr_span.set_inputs({"model": LLM_MODEL, "tool_results_count": len(tool_results_for_writer)})
                 final_text = await _call_llm_stream(
                     _build_writer_prompt(),
-                    writer_messages, max_tokens=3000, temperature=0.2,
+                    writer_messages, max_tokens=3000,
                     on_token=on_token,
                 )
                 wr_span.set_outputs({"response_length": len(final_text)})
@@ -728,13 +730,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
             print(f"[WRITER] Span error: {e}")
             final_text = await _call_llm_stream(
                 _build_writer_prompt(),
-                writer_messages, max_tokens=3000, temperature=0.2,
+                writer_messages, max_tokens=3000,
                 on_token=on_token,
             )
     else:
         final_text = await _call_llm_stream(
             _build_writer_prompt(),
-            writer_messages, max_tokens=3000, temperature=0.2,
+            writer_messages, max_tokens=3000,
             on_token=on_token,
         )
 
