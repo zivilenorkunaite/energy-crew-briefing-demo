@@ -75,7 +75,10 @@
         <div style="background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;margin:6px 0;">
           <div id="warmBar" style="background:var(--ee-navy);height:100%;width:0%;transition:width 0.3s;border-radius:4px;"></div>
         </div>
-        <span id="warmText">Starting...</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span id="warmText">Starting...</span>
+          <span id="warmStop" onclick="stopWarm()" style="color:#e53e3e;cursor:pointer;font-size:11px;display:none;">Stop</span>
+        </div>
       </div>
     </div>
   </div>
@@ -165,21 +168,49 @@
 
     loadStats();
 
-    // Warm cache
+    // Warm cache — persists state to localStorage, supports cancel
     let warming = false;
-    async function warmCache() {
-      if (warming) return;
-      warming = true;
+    let warmController = null;
+
+    function updateWarmUI(state) {
       const link = document.getElementById('warmLink');
       const prog = document.getElementById('warmProgress');
       const bar = document.getElementById('warmBar');
       const text = document.getElementById('warmText');
-      link.style.color = '#718096';
-      link.textContent = 'Warming cache...';
-      prog.style.display = 'block';
+      const stop = document.getElementById('warmStop');
+
+      if (state && state.active) {
+        link.style.color = '#718096';
+        link.textContent = 'Warming cache...';
+        prog.style.display = 'block';
+        stop.style.display = 'inline';
+        const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
+        bar.style.width = pct + '%';
+        text.textContent = `${state.phase}: ${state.done}/${state.total} (${state.skipped} cached, ${state.errors} errors)`;
+      } else if (state && state.phase === 'done') {
+        link.textContent = 'Cache warmed';
+        link.style.color = '#276749';
+        stop.style.display = 'none';
+        setTimeout(() => { link.textContent = 'Pre-load cache for all locations and dates'; link.style.color = '#a0aec0'; prog.style.display = 'none'; bar.style.width = '0%'; }, 5000);
+      }
+    }
+
+    // Restore state on page load
+    try {
+      const saved = JSON.parse(localStorage.getItem('warmState') || 'null');
+      if (saved && saved.active) updateWarmUI(saved);
+    } catch (e) {}
+
+    async function warmCache() {
+      if (warming) return;
+      warming = true;
+      warmController = new AbortController();
+
+      localStorage.setItem('warmState', JSON.stringify({ active: true, done: 0, total: 0, skipped: 0, errors: 0, phase: 'starting' }));
+      updateWarmUI({ active: true, done: 0, total: 0, skipped: 0, errors: 0, phase: 'starting' });
 
       try {
-        const res = await fetch('/api/cache/warm', { method: 'POST' });
+        const res = await fetch('/api/cache/warm', { method: 'POST', signal: warmController.signal });
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -195,24 +226,41 @@
             if (!line.startsWith('data: ')) continue;
             try {
               const d = JSON.parse(line.slice(6));
-              const pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
-              bar.style.width = pct + '%';
-              text.textContent = `${d.phase}: ${d.done}/${d.total} (${d.skipped} cached, ${d.errors} errors)`;
+              const state = { ...d, active: d.phase !== 'done' };
+              localStorage.setItem('warmState', JSON.stringify(state));
+              updateWarmUI(state);
               if (d.phase === 'done') {
-                link.textContent = 'Cache warmed';
-                link.style.color = '#276749';
-                setTimeout(() => { link.textContent = 'Pre-load cache for all locations and dates'; link.style.color = '#a0aec0'; }, 5000);
+                localStorage.removeItem('warmState');
               }
             } catch (e) {}
           }
         }
       } catch (e) {
-        text.textContent = 'Error: ' + e.message;
+        if (e.name === 'AbortError') {
+          document.getElementById('warmText').textContent = 'Stopped';
+        } else {
+          document.getElementById('warmText').textContent = 'Error: ' + e.message;
+        }
+        localStorage.removeItem('warmState');
       }
 
       warming = false;
+      warmController = null;
+      document.getElementById('warmStop').style.display = 'none';
       loadStats();
-      setTimeout(() => { prog.style.display = 'none'; bar.style.width = '0%'; }, 8000);
+    }
+
+    function stopWarm() {
+      if (warmController) {
+        warmController.abort();
+        localStorage.removeItem('warmState');
+        setTimeout(() => {
+          document.getElementById('warmProgress').style.display = 'none';
+          document.getElementById('warmBar').style.width = '0%';
+          document.getElementById('warmLink').textContent = 'Pre-load cache for all locations and dates';
+          document.getElementById('warmLink').style.color = '#a0aec0';
+        }, 2000);
+      }
     }
   </script>
 </body>
