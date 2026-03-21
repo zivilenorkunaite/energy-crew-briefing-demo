@@ -9,7 +9,7 @@ env:
   - name: SUPERVISOR_GATEWAY_URL
     value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/cursor/v1/chat/completions'
   - name: GENIE_SPACE_ID
-    value: '01f111b05416164989106b097e2f7d21'
+    valueFrom: 'genie-field-ops'
   - name: SWMS_ENDPOINT
     value: 'swms-knowledge-assistant-v2'
   - name: TAVILY_API_KEY

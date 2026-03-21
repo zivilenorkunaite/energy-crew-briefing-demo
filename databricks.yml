@@ -57,11 +57,14 @@ resources:
           - name: ENDPOINT_NAME
             value: projects/ee-crew-briefing-as/branches/production/endpoints/primary
           - name: GENIE_SPACE_ID
-            value: "01f111b05416164989106b097e2f7d21"
+            value_from: genie-field-ops
 
       resources:
-        # Genie Room (01f111b05416164989106b097e2f7d21) — CAN_RUN granted to SP separately
-        # (genie resource type not supported in bundle format)
+        - name: genie-field-ops
+          description: "Genie Room — Field Operations (WACS data)"
+          genie_space:
+            space_id: "01f111b05416164989106b097e2f7d21"
+            permission: CAN_RUN
 
         - name: swms-v2
           description: "SWMS Knowledge Assistant v2 — lightweight RAG"
