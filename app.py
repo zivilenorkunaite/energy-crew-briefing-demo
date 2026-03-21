@@ -34,7 +34,6 @@ _token_refresh_task: Optional[asyncio.Task] = None
 _cache_warm_task: Optional[asyncio.Task] = None
 _warm_history: list = []  # [{trigger, start, end, duration_s, before, after, skipped, errors, status, phase, done, total}]
 _warm_cancel = False
-_warm_enabled = True  # toggle via /api/cache/warm/enabled
 MAX_WARM_HISTORY = 20
 
 
@@ -125,9 +124,11 @@ async def _cache_warm_loop():
             record["status"] = "done"
         print(f"[WARM] {trigger}: {before_total} → {after_total} in {elapsed}s")
 
+    from server.settings import get_bool
+
     # Initial warm on startup (after 30s delay)
     await asyncio.sleep(30)
-    if _warm_enabled:
+    if await get_bool("warm_enabled", True):
         print("[WARM] Initial cache warm on startup...")
         await _run_warm("startup")
     else:
@@ -136,7 +137,7 @@ async def _cache_warm_loop():
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
         try:
-            if not _warm_enabled:
+            if not await get_bool("warm_enabled", True):
                 continue
 
             now = datetime.now(syd)
@@ -380,16 +381,18 @@ async def warm_stop():
     return {"ok": True}
 
 
-@app.get("/api/cache/warm/enabled")
-async def warm_enabled_get():
-    return {"enabled": _warm_enabled}
+@app.get("/api/settings")
+async def get_settings():
+    from server.settings import get_all
+    return await get_all()
 
 
-@app.post("/api/cache/warm/enabled")
-async def warm_enabled_set(req: dict = {}):
-    global _warm_enabled
-    _warm_enabled = bool(req.get("enabled", True))
-    return {"enabled": _warm_enabled}
+@app.post("/api/settings/{key}")
+async def set_setting_endpoint(key: str, req: dict = {}):
+    from server.settings import set_setting
+    value = str(req.get("value", "false"))
+    await set_setting(key, value)
+    return {"ok": True, "key": key, "value": value}
 
 
 @app.post("/api/cache/warm")

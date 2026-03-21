@@ -111,40 +111,39 @@
       'query_weather': { name: 'Weather', ttl: '30 minutes' },
     };
 
-    // Stream toggle
-    let streamMode = localStorage.getItem('streamMode') === 'true';
-    document.getElementById('streamToggle').classList.toggle('active', streamMode);
-
-    function toggleStream() {
-      streamMode = !streamMode;
-      localStorage.setItem('streamMode', streamMode);
-      document.getElementById('streamToggle').classList.toggle('active', streamMode);
-    }
-
-    // Warm enabled toggle (server-side state)
-    async function loadWarmEnabled() {
+    // Load all settings from server
+    let settings = {};
+    async function loadSettings() {
       try {
-        const res = await fetch('/api/cache/warm/enabled');
-        const data = await res.json();
-        document.getElementById('warmEnabledToggle').classList.toggle('active', data.enabled);
+        const res = await fetch('/api/settings');
+        settings = await res.json();
+        document.getElementById('streamToggle').classList.toggle('active', settings.stream_response === 'true');
+        document.getElementById('warmEnabledToggle').classList.toggle('active', settings.warm_enabled !== 'false');
       } catch (e) {}
     }
-    async function toggleWarmEnabled() {
-      const toggle = document.getElementById('warmEnabledToggle');
-      const newVal = !toggle.classList.contains('active');
-      toggle.classList.toggle('active', newVal);
+    async function setSetting(key, value) {
       try {
-        await fetch('/api/cache/warm/enabled', {
+        await fetch(`/api/settings/${key}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: newVal }),
+          body: JSON.stringify({ value: String(value) }),
         });
-        showStatus(newVal ? 'Scheduled warming enabled' : 'Scheduled warming disabled', true);
-      } catch (e) {
-        showStatus('Error updating', false);
-      }
+      } catch (e) {}
     }
-    loadWarmEnabled();
+    function toggleStream() {
+      const active = !document.getElementById('streamToggle').classList.contains('active');
+      document.getElementById('streamToggle').classList.toggle('active', active);
+      setSetting('stream_response', active);
+      localStorage.setItem('streamMode', active); // also sync to localStorage for chat page
+    }
+
+    function toggleWarmEnabled() {
+      const active = !document.getElementById('warmEnabledToggle').classList.contains('active');
+      document.getElementById('warmEnabledToggle').classList.toggle('active', active);
+      setSetting('warm_enabled', active);
+      showStatus(active ? 'Scheduled warming enabled' : 'Scheduled warming disabled', true);
+    }
+    loadSettings();
 
     // Cache management
     async function loadStats() {
