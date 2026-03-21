@@ -206,6 +206,38 @@ async def health():
     return {"status": "healthy", "app": "EE Crew Briefing"}
 
 
+# ── Cache endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/cache/stats")
+async def cache_stats():
+    try:
+        from server.cache import get_cache_stats
+        stats = await get_cache_stats()
+        return {"stats": stats}
+    except Exception as e:
+        return {"stats": [], "error": str(e)}
+
+
+@app.delete("/api/cache/{tool_name}")
+async def clear_cache_tool(tool_name: str):
+    try:
+        from server.cache import clear_tool_cache
+        count = await clear_tool_cache(tool_name)
+        return {"ok": True, "cleared": count, "tool": tool_name}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.delete("/api/cache")
+async def clear_cache_all():
+    try:
+        from server.cache import clear_all_cache
+        count = await clear_all_cache()
+        return {"ok": True, "cleared": count}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── Static files ──────────────────────────────────────────────────────────────
 
 static_dir = Path(__file__).parent / "static"

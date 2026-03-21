@@ -407,7 +407,9 @@ async def _call_llm_stream(
     return full_text
 
 
-# ── Tool Execution ─────────────────────────────────────────────────────────
+# ── Tool Execution (with cache) ────────────────────────────────────────────
+
+from server.cache import get_cached, set_cached
 
 def _unwrap_exception(e: BaseException) -> str:
     if hasattr(e, "exceptions") and e.exceptions:
@@ -416,7 +418,39 @@ def _unwrap_exception(e: BaseException) -> str:
 
 
 async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
-    """Execute a tool call and return (result_text, source_info)."""
+    """Execute a tool call with cache. Returns (result_text, source_info)."""
+    # Check cache first
+    cached = await get_cached(name, args)
+    if cached is not None:
+        source = _build_source(name, args, cached=True)
+        return cached, source
+
+    result, source = await _execute_tool_uncached(name, args)
+
+    # Cache successful results (not errors)
+    if not any(x in result.lower() for x in ["(failed", "(error", "(unavailable", "[ai error"]):
+        await set_cached(name, args, result)
+
+    return result, source
+
+
+def _build_source(name: str, args: dict, cached: bool = False) -> dict:
+    """Build source info dict for a tool."""
+    tag = " (cached)" if cached else ""
+    if name == "query_genie":
+        return {"type": "genie", "label": f"Genie: {args.get('question','')[:70]}{tag}"}
+    elif name == "get_swms":
+        label = args.get("document_name") or f"SWMS – {args.get('query','')[:50]}"
+        return {"type": "pdf", "label": f"{label}{tag}"}
+    elif name == "query_weather":
+        return {"type": "weather", "label": f"Weather: {args.get('location','')[:60]}{tag}"}
+    elif name == "search_local_notices":
+        return {"type": "web", "label": f"Web: {args.get('location','')[:60]}{tag}"}
+    return {}
+
+
+async def _execute_tool_uncached(name: str, args: dict) -> tuple[str, dict]:
+    """Execute a tool call (no cache). Returns (result_text, source_info)."""
     if name == "query_genie":
         question = args.get("question", "")
         print(f"[AGENT] Genie query: {question}")
@@ -424,7 +458,7 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
             result = await query_genie(question)
         except BaseException as e:
             result = f"(Genie query failed: {_unwrap_exception(e)})"
-        return result, {"type": "genie", "label": f"Genie: {question[:70]}"}
+        return result, _build_source(name, args)
 
     elif name == "get_swms":
         query = args.get("query", "")
@@ -434,7 +468,7 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
             result = await query_swms(query, document_name=document_name)
         except BaseException as e:
             result = f"(SWMS search failed: {_unwrap_exception(e)})"
-        return result, {"type": "pdf", "label": document_name or f"SWMS – {query[:50]}"}
+        return result, _build_source(name, args)
 
     elif name == "query_weather":
         location = args.get("location", "")
@@ -445,7 +479,7 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
             result = await query_weather(loc_with_date)
         except BaseException as e:
             result = f"(Weather query failed: {_unwrap_exception(e)})"
-        return result, {"type": "weather", "label": f"Weather: {location[:60]}"}
+        return result, _build_source(name, args)
 
     elif name == "search_local_notices":
         location = args.get("location", "")
@@ -455,7 +489,7 @@ async def _execute_tool(name: str, args: dict) -> tuple[str, dict]:
             result = await search_local_notices(location, search_type=search_type)
         except BaseException as e:
             result = f"(Web search failed: {_unwrap_exception(e)})"
-        return result, {"type": "web", "label": f"Web: {location[:60]}"}
+        return result, _build_source(name, args)
 
     return f"Unknown tool: {name}", {}
 

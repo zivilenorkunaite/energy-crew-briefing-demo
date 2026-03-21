@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — EE Crew Briefing</title>
+  <style>
+    :root { --ee-navy: #1a365d; --ee-orange: #E07020; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #1a202c; }
+    .header { background: var(--ee-navy); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .header a { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px; }
+    .header a:hover { color: white; }
+    .container { max-width: 640px; margin: 32px auto; padding: 0 16px; }
+    .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--ee-navy); }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-label { font-size: 14px; font-weight: 500; }
+    .setting-desc { font-size: 12px; color: #718096; margin-top: 2px; }
+    .toggle { width: 44px; height: 24px; background: #cbd5e0; border-radius: 12px; cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+    .toggle.active { background: var(--ee-navy); }
+    .toggle::after { content: ''; width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform 0.2s; }
+    .toggle.active::after { transform: translateX(20px); }
+    .cache-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+    .cache-row:last-child { border-bottom: none; }
+    .cache-info { flex: 1; }
+    .cache-tool { font-size: 14px; font-weight: 500; }
+    .cache-meta { font-size: 12px; color: #718096; }
+    .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #e2e8f0; background: white; color: #e53e3e; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+    .btn:hover { background: #fff5f5; border-color: #fed7d7; }
+    .btn-all { background: #e53e3e; color: white; border-color: #e53e3e; margin-top: 12px; }
+    .btn-all:hover { background: #c53030; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .badge-count { background: #ebf8ff; color: #2b6cb0; }
+    .badge-ttl { background: #f0fff4; color: #276749; }
+    .empty { color: #a0aec0; font-size: 13px; font-style: italic; padding: 8px 0; }
+    #status { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 8px; display: none; }
+    .status-ok { background: #f0fff4; color: #276749; }
+    .status-err { background: #fff5f5; color: #c53030; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <a href="/">&larr; Back to Chat</a>
+    <h1>Settings</h1>
+  </div>
+
+  <div class="container">
+    <!-- Response Settings -->
+    <div class="card">
+      <h2>Response</h2>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Stream writer response</div>
+          <div class="setting-desc">Show text as it's generated instead of waiting for the full response</div>
+        </div>
+        <div class="toggle" id="streamToggle" onclick="toggleStream()"></div>
+      </div>
+    </div>
+
+    <!-- Cache Settings -->
+    <div class="card">
+      <h2>Tool Cache</h2>
+      <p style="font-size:13px;color:#718096;margin-bottom:12px;">Cached tool results are stored in Lakebase to speed up repeated queries.</p>
+      <div id="cacheList"><div class="empty">Loading cache stats...</div></div>
+      <div id="status"></div>
+      <button class="btn btn-all" onclick="clearAll()">Clear All Cache</button>
+    </div>
+  </div>
+
+  <script>
+    const TOOL_LABELS = {
+      'get_swms': { name: 'SWMS Knowledge Assistant', ttl: '24 hours' },
+      'query_genie': { name: 'Genie (WACS Database)', ttl: '10 minutes' },
+      'search_local_notices': { name: 'Web Search (Local Notices)', ttl: '2 hours' },
+      'query_weather': { name: 'Weather', ttl: '30 minutes' },
+    };
+
+    // Stream toggle
+    let streamMode = localStorage.getItem('streamMode') === 'true';
+    document.getElementById('streamToggle').classList.toggle('active', streamMode);
+
+    function toggleStream() {
+      streamMode = !streamMode;
+      localStorage.setItem('streamMode', streamMode);
+      document.getElementById('streamToggle').classList.toggle('active', streamMode);
+    }
+
+    // Cache management
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/cache/stats');
+        const data = await res.json();
+        renderStats(data.stats || []);
+      } catch (e) {
+        document.getElementById('cacheList').innerHTML = '<div class="empty">Could not load cache stats</div>';
+      }
+    }
+
+    function renderStats(stats) {
+      const el = document.getElementById('cacheList');
+      const statsMap = {};
+      stats.forEach(s => { statsMap[s.tool_name] = s; });
+
+      let html = '';
+      for (const [tool, info] of Object.entries(TOOL_LABELS)) {
+        const s = statsMap[tool];
+        const count = s ? s.count : 0;
+        html += `<div class="cache-row">
+          <div class="cache-info">
+            <div class="cache-tool">${info.name}</div>
+            <div class="cache-meta">
+              <span class="badge badge-count">${count} cached</span>
+              <span class="badge badge-ttl">TTL: ${info.ttl}</span>
+            </div>
+          </div>
+          <button class="btn" onclick="clearTool('${tool}')" ${count === 0 ? 'disabled style="opacity:0.4"' : ''}>Clear</button>
+        </div>`;
+      }
+      el.innerHTML = html || '<div class="empty">No cache entries</div>';
+    }
+
+    function showStatus(msg, ok) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = ok ? 'status-ok' : 'status-err';
+      el.style.display = 'block';
+      setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+
+    async function clearTool(tool) {
+      try {
+        const res = await fetch(`/api/cache/${tool}`, { method: 'DELETE' });
+        const data = await res.json();
+        showStatus(`Cleared ${data.cleared || 0} cached entries for ${TOOL_LABELS[tool]?.name || tool}`, true);
+        loadStats();
+      } catch (e) {
+        showStatus('Error clearing cache', false);
+      }
+    }
+
+    async function clearAll() {
+      if (!confirm('Clear all cached tool results?')) return;
+      try {
+        const res = await fetch('/api/cache', { method: 'DELETE' });
+        const data = await res.json();
+        showStatus(`Cleared ${data.cleared || 0} total cached entries`, true);
+        loadStats();
+      } catch (e) {
+        showStatus('Error clearing cache', false);
+      }
+    }
+
+    loadStats();
+  </script>
+</body>
+</html>

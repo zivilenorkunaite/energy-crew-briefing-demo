@@ -372,6 +372,9 @@
         <span class="xray-toggle-label">X-Ray Mode</span>
         <div class="xray-switch"></div>
       </div>
+      <a href="/settings" style="display:flex;align-items:center;gap:8px;padding:8px 12px;color:#999;text-decoration:none;font-size:12px;font-weight:600;letter-spacing:0.3px;transition:color 0.2s;" onmouseover="this.style.color='#1a365d'" onmouseout="this.style.color='#999'">
+        <span style="font-size:14px">&#x2699;</span> Settings
+      </a>
       <div class="xray-toggle" id="streamToggle" onclick="toggleStream()" style="display:none">
         <span style="font-size:13px">&#x26A1;</span>
         <span class="xray-toggle-label">Stream Response</span>
@@ -426,7 +429,7 @@
     let busy = false;
     let serverSessions = true;  // assume server sessions available
     let xrayMode = localStorage.getItem('xrayMode') === 'true';
-    let streamMode = localStorage.getItem('streamMode') !== 'false'; // default ON
+    let streamMode = localStorage.getItem('streamMode') === 'true'; // default OFF
     let collectedSteps = [];    // steps collected during agent run
 
     // ── X-Ray toggle ──
