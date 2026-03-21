@@ -80,8 +80,8 @@ app = FastAPI(
 class IframeHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        response.headers["content-security-policy"] = "frame-ancestors *"
-        response.headers["x-frame-options"] = "ALLOWALL"
+        response.headers["content-security-policy"] = "frame-ancestors 'self' *.databricks.com *.databricksapps.com"
+        response.headers["x-frame-options"] = "SAMEORIGIN"
         return response
 
 
@@ -165,8 +165,8 @@ async def chat(req: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "content-security-policy": "frame-ancestors *",
-            "x-frame-options": "ALLOWALL",
+            "content-security-policy": "frame-ancestors 'self' *.databricks.com *.databricksapps.com",
+            "x-frame-options": "SAMEORIGIN",
         },
     )
 
