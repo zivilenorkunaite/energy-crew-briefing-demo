@@ -67,6 +67,12 @@ resources:
             space_id: "01f111b05416164989106b097e2f7d21"
             permission: CAN_RUN
 
+        - name: mlflow-traces
+          description: "MLflow experiment for agent tracing"
+          experiment:
+            experiment_id: "416109917792683"
+            permission: CAN_MANAGE
+
         - name: swms-v2
           description: "SWMS Knowledge Assistant v2 — lightweight RAG"
           serving_endpoint:
