@@ -20,8 +20,26 @@ DEFAULT_TTL = 600  # 10 min
 
 
 def _cache_key(tool_name: str, args: dict) -> str:
-    """Generate a deterministic cache key from tool name + args."""
-    raw = json.dumps({"tool": tool_name, "args": args}, sort_keys=True)
+    """Generate a deterministic cache key from tool name + normalized args.
+
+    SWMS: keyed by document_name only (full doc loaded regardless of query).
+    Genie: keyed by lowercased question.
+    Weather: keyed by location + date.
+    Web: keyed by location + search_type.
+    """
+    if tool_name == "get_swms":
+        # Same document → same result (full doc loading, not VS retrieval)
+        normalized = {"tool": tool_name, "document_name": (args.get("document_name") or "default").lower().strip()}
+    elif tool_name == "query_genie":
+        normalized = {"tool": tool_name, "question": args.get("question", "").lower().strip()}
+    elif tool_name == "query_weather":
+        normalized = {"tool": tool_name, "location": args.get("location", "").lower().strip(), "date": args.get("date") or "current"}
+    elif tool_name == "search_local_notices":
+        normalized = {"tool": tool_name, "location": args.get("location", "").lower().strip(), "search_type": args.get("search_type", "all")}
+    else:
+        normalized = {"tool": tool_name, "args": args}
+
+    raw = json.dumps(normalized, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
