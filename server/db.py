@@ -9,22 +9,56 @@ import asyncpg
 from typing import Optional, List, Any
 
 SCHEMA = os.environ.get("PGSCHEMA", "public")
-_ENDPOINT_NAME = os.environ.get(
-    "ENDPOINT_NAME",
-    "projects/energy-crew-briefing-as/branches/production/endpoints/primary",
-)
+_ENDPOINT_NAME = os.environ.get("ENDPOINT_NAME", "energy-crew-briefing")
 
 
 def _generate_token() -> str:
-    """Generate a fresh OAuth token for Lakebase Autoscaling."""
+    """Generate a fresh OAuth token for Lakebase."""
     from databricks.sdk import WorkspaceClient
+    import json
     w = WorkspaceClient()
-    cred = w.postgres.generate_database_credential(endpoint=_ENDPOINT_NAME)
-    token = getattr(cred, "token", None) or getattr(cred, "password", "")
-    if not token:
-        raise RuntimeError("generate_database_credential returned no token")
-    print(f"[DB] Generated Lakebase token ({len(token)} chars)")
-    return token
+    host = w.config.host
+
+    # Method 1: SDK postgres API (AWS Lakebase Autoscaling)
+    try:
+        cred = w.postgres.generate_database_credential(endpoint=_ENDPOINT_NAME)
+        token = getattr(cred, "token", None) or getattr(cred, "password", "")
+        if token:
+            print(f"[DB] Lakebase token via postgres SDK ({len(token)} chars)")
+            return token
+    except Exception as e:
+        print(f"[DB] postgres SDK failed: {e}")
+
+    # Method 2: SDK database API (Azure Lakebase)
+    try:
+        cred = w.database.generate_database_credential(instance_names=[_ENDPOINT_NAME])
+        token = getattr(cred, "token", None) or getattr(cred, "password", "")
+        if token:
+            print(f"[DB] Lakebase token via database SDK ({len(token)} chars)")
+            return token
+    except Exception as e:
+        print(f"[DB] database SDK failed: {e}")
+
+    # Method 3: REST API fallback
+    try:
+        import urllib.request
+        auth = w.config.authenticate()
+        bearer = auth.get("Authorization", "")
+        req = urllib.request.Request(
+            f"{host}/api/2.0/database/generate-database-credential",
+            data=json.dumps({"instance_names": [_ENDPOINT_NAME]}).encode(),
+            headers={"Authorization": bearer, "Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = json.loads(urllib.request.urlopen(req, timeout=15).read())
+        token = resp.get("token", "")
+        if token:
+            print(f"[DB] Lakebase token via REST API ({len(token)} chars)")
+            return token
+    except Exception as e:
+        print(f"[DB] REST API failed: {e}")
+
+    raise RuntimeError("Could not generate Lakebase credential")
 
 
 class DatabasePool:

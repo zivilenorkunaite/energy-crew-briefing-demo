@@ -10,7 +10,7 @@ from mcp import ClientSession
 import os
 from server.config import get_workspace_host
 
-GENIE_ROOM_2_ID = os.environ["GENIE_SPACE_ID"]
+GENIE_ROOM_2_ID = os.environ.get("GENIE_SPACE_ID", "")
 _TOOL_QUERY = f"query_space_{GENIE_ROOM_2_ID}"
 _TOOL_POLL  = f"poll_response_{GENIE_ROOM_2_ID}"
 

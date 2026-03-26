@@ -25,7 +25,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
-from server.agent import run_agent
+_startup_errors = []
+
+try:
+    from server.agent import run_agent
+except Exception as e:
+    _startup_errors.append(f"agent import: {e}")
+    async def run_agent(*a, **kw):
+        yield {"type": "error", "content": f"Agent not available: {_startup_errors}"}
+
 from server.branding import (
     APP_TITLE, COMPANY_NAME, PAGE_TITLE, APP_DISPLAY, APP_SUBTITLE,
     COLOR_PRIMARY, COLOR_PRIMARY_LIGHT, COLOR_ACCENT, COLOR_ACCENT_LIGHT, COLOR_USER_BG,
@@ -212,7 +220,11 @@ async def delete_session(session_id: str):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "healthy", "app": APP_TITLE}
+    result = {"status": "healthy", "app": APP_TITLE}
+    if _startup_errors:
+        result["startup_errors"] = _startup_errors
+        result["status"] = "degraded"
+    return result
 
 
 @app.get("/api/branding")

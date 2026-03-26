@@ -79,8 +79,8 @@ if $RUN_SETUP; then
     python3 "$SCRIPT_DIR/setup/12_genie_room.py"
 
     echo ""
-    echo "--- Phase 9: SWMS Serving Endpoint ---"
-    python3 "$SCRIPT_DIR/setup/06_swms_agent.py"
+    echo "--- Phase 9: SWMS Serving Endpoint (skipped — run on workspace or with Azure SDK) ---"
+    echo "  To deploy manually: python3 setup/06_swms_agent.py"
 
     echo ""
     echo "--- Phase 10: Prompt Registry ---"
