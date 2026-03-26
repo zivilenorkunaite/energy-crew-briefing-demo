@@ -86,15 +86,8 @@ def _extract_location(text: str) -> str:
 
 
 def _cache_key(tool_name: str, args: dict) -> str:
-    """Generate a deterministic cache key from tool name + normalized args.
-
-    SWMS: keyed by document_name only (full doc loaded regardless of query).
-    Genie: keyed by lowercased question.
-    Weather: keyed by location + date.
-    Web: keyed by location + search_type.
-    """
+    """Generate a deterministic cache key from tool name and args."""
     if tool_name == "get_swms":
-        # Same document → same result (full doc loading, not VS retrieval)
         normalized = {"tool": tool_name, "document_name": (args.get("document_name") or "default").lower().strip()}
     elif tool_name == "query_genie":
         # Extract crew, date, and intent for stable cache keys

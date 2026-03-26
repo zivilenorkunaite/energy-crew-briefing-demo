@@ -3,36 +3,21 @@
 Run once from local machine with Databricks CLI configured (DEFAULT profile).
 
 Steps:
-  1. Create Lakebase instance 'ee-crew-briefing' + database 'crew_briefing'
+  1. Create Lakebase instance 'energy-crew-briefing' + database 'crew_briefing'
   2. Create conversations + messages tables (via psycopg2)
   3. Grant App SP connect + table access
 """
 
-import subprocess
 import json
 import time
 import sys
+import os
 
-PROFILE = "DEFAULT"
-LAKEBASE_INSTANCE = "ee-crew-briefing"
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import run_cli, get_app_sp_id, get_user, PROFILE
+
+LAKEBASE_INSTANCE = "energy-crew-briefing"
 DATABASE = "crew_briefing"
-APP_SP_ID = "84fba77d-2b5d-40ef-94e4-a0c81b5af427"
-
-
-def run_cli(args: list[str], parse_json=True):
-    """Run a databricks CLI command and return parsed output."""
-    cmd = ["databricks"] + args + ["--profile", PROFILE]
-    print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"  ERROR: {result.stderr.strip()}")
-        return None
-    if parse_json and result.stdout.strip():
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return result.stdout.strip()
-    return result.stdout.strip()
 
 
 def step1_create_instance():
@@ -66,7 +51,7 @@ def step1_create_instance():
         if result and isinstance(result, dict):
             state = result.get("state", "")
             print(f"  [{i*10}s] Instance state: {state}")
-            if state == "RUNNING":
+            if state in ("RUNNING", "AVAILABLE"):
                 host = result.get("read_write_dns", "")
                 print(f"  PGHOST: {host}")
                 return result
@@ -79,7 +64,7 @@ def step2_create_database_and_tables():
     print("\n=== Step 2: Create database + tables ===")
 
     # Get instance details
-    result = run_cli(["database", "get-database-instance", "--name", LAKEBASE_INSTANCE])
+    result = run_cli(["database", "get-database-instance", LAKEBASE_INSTANCE])
     if not result or not isinstance(result, dict):
         print("  Cannot get instance details.")
         sys.exit(1)
@@ -90,7 +75,10 @@ def step2_create_database_and_tables():
         sys.exit(1)
 
     # Get token
-    token_result = run_cli(["database", "generate-database-credential"])
+    token_result = run_cli([
+        "database", "generate-database-credential",
+        "--json", json.dumps({"instance_names": [LAKEBASE_INSTANCE]}),
+    ])
     if not token_result or not isinstance(token_result, dict):
         print("  Cannot generate database credential.")
         sys.exit(1)
@@ -104,7 +92,7 @@ def step2_create_database_and_tables():
         host=host,
         port=5432,
         database="databricks_postgres",
-        user="zivile.norkunaite@databricks.com",
+        user=get_user(),
         password=token,
         sslmode="require",
     )
@@ -126,7 +114,7 @@ def step2_create_database_and_tables():
         host=host,
         port=5432,
         database=DATABASE,
-        user="zivile.norkunaite@databricks.com",
+        user=get_user(),
         password=token,
         sslmode="require",
     )
@@ -159,7 +147,26 @@ def step2_create_database_and_tables():
         CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)
     """)
 
-    print("  Tables created.")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tool_cache (
+            cache_key VARCHAR(64) PRIMARY KEY,
+            tool_name VARCHAR(64) NOT NULL,
+            args_json TEXT,
+            result TEXT,
+            ttl_seconds INTEGER DEFAULT 86400,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key VARCHAR(128) PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+
+    print("  Tables created (conversations, messages, tool_cache, app_settings).")
     cur.close()
     conn.close()
 
@@ -167,14 +174,15 @@ def step2_create_database_and_tables():
 def step3_grant_sp():
     """Grant App SP connect + table access."""
     print("\n=== Step 3: Grant SP access ===")
-    print(f"  Granting CONNECT on instance '{LAKEBASE_INSTANCE}' to SP {APP_SP_ID}...")
+    sp_id = get_app_sp_id()
+    print(f"  Granting CONNECT on instance '{LAKEBASE_INSTANCE}' to SP {sp_id}...")
 
     # Grant via the database permissions API
     run_cli([
         "database", "grant-database-access",
         LAKEBASE_INSTANCE,
         "--principal-type", "SERVICE_PRINCIPAL",
-        "--principal-id", APP_SP_ID,
+        "--principal-id", sp_id,
     ])
 
     print("  Done.")

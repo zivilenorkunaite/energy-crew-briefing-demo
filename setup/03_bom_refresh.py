@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Weather Refresh (Open-Meteo)
 # MAGIC Fetches current observations + 7-day hourly forecasts from Open-Meteo API
-# MAGIC for Essential Energy depot areas and upserts into `zivile.essential_energy_wacs.bom_weather`.
+# MAGIC for depot areas and upserts into `main.energy_crew_briefing.bom_weather`.
 # MAGIC
 # MAGIC Scheduled hourly via DAB job (serverless compute).
 
@@ -11,9 +11,9 @@
 import json
 import urllib.request
 
-TABLE = "zivile.essential_energy_wacs.bom_weather"
+TABLE = "main.energy_crew_briefing.bom_weather"
 
-# Essential Energy depot locations
+# Depot locations
 STATIONS = [
     {"name": "Grafton",         "lat": -29.69, "lon": 152.93},
     {"name": "Coffs Harbour",   "lat": -30.30, "lon": 153.11},

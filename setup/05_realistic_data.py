@@ -1,4 +1,4 @@
-"""Generate realistic WACS data for EE Crew Briefing demo.
+"""Generate realistic operations data for Energy Crew Briefing demo.
 
 Creates depot-based crews with real Australian names, historical work orders
 for March 2026 and scheduled work through mid-April 2026.
@@ -7,20 +7,20 @@ Easter 2026: Good Friday 3 Apr, Easter Saturday 4 Apr, Easter Monday 6 Apr.
 Run with: python3 setup/05_realistic_data.py
 """
 
-import subprocess
 import json
 import random
+import sys
+import os
 from datetime import date, timedelta, datetime
 
-PROFILE = "DEFAULT"
-WAREHOUSE_ID = "c2abb17a6c9e6bc0"
-SCHEMA = "zivile.essential_energy_wacs"
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import run_sql, UC_FULL
 
 # ── Easter 2026 public holidays ──
 EASTER_DATES = {date(2026, 4, 3), date(2026, 4, 4), date(2026, 4, 5), date(2026, 4, 6)}
-# Other NSW public holidays in range
-NSW_HOLIDAYS = EASTER_DATES | {
-    date(2026, 3, 2),   # Bank Holiday (hypothetical Canberra Day region)
+# Other public holidays in range
+PUBLIC_HOLIDAYS = EASTER_DATES | {
+    date(2026, 3, 2),   # Bank Holiday (regional)
 }
 
 random.seed(42)  # reproducible
@@ -302,6 +302,59 @@ WO_TEMPLATES = {
 PRIORITIES = ["Critical", "High", "Medium", "Low"]
 PRIORITY_WEIGHTS = [5, 20, 50, 25]
 
+# ── Asset types (realistic Australian energy distribution) ──
+ASSET_TYPES = [
+    {"id": 1, "name": "Timber Pole", "category": "Poles & Structures", "lifespan": 45, "inspection_months": 60},
+    {"id": 2, "name": "Concrete Pole", "category": "Poles & Structures", "lifespan": 60, "inspection_months": 60},
+    {"id": 3, "name": "Steel Pole", "category": "Poles & Structures", "lifespan": 50, "inspection_months": 60},
+    {"id": 4, "name": "Stobie Pole", "category": "Poles & Structures", "lifespan": 70, "inspection_months": 60},
+    {"id": 5, "name": "Stay Wire", "category": "Poles & Structures", "lifespan": 30, "inspection_months": 60},
+    {"id": 6, "name": "Overhead Conductor", "category": "Conductors & Cables", "lifespan": 50, "inspection_months": 120},
+    {"id": 7, "name": "Underground Cable", "category": "Conductors & Cables", "lifespan": 40, "inspection_months": 120},
+    {"id": 8, "name": "Service Line", "category": "Conductors & Cables", "lifespan": 35, "inspection_months": 120},
+    {"id": 9, "name": "Aerial Bundled Cable", "category": "Conductors & Cables", "lifespan": 35, "inspection_months": 120},
+    {"id": 10, "name": "Pole-Mount Transformer", "category": "Transformers", "lifespan": 35, "inspection_months": 24},
+    {"id": 11, "name": "Pad-Mount Transformer", "category": "Transformers", "lifespan": 35, "inspection_months": 24},
+    {"id": 12, "name": "Zone Substation Transformer", "category": "Transformers", "lifespan": 40, "inspection_months": 12},
+    {"id": 13, "name": "Recloser", "category": "Switchgear", "lifespan": 25, "inspection_months": 12},
+    {"id": 14, "name": "Sectionaliser", "category": "Switchgear", "lifespan": 25, "inspection_months": 12},
+    {"id": 15, "name": "Fuse Switch", "category": "Switchgear", "lifespan": 30, "inspection_months": 24},
+    {"id": 16, "name": "Ring Main Unit", "category": "Switchgear", "lifespan": 30, "inspection_months": 24},
+    {"id": 17, "name": "Circuit Breaker", "category": "Switchgear", "lifespan": 30, "inspection_months": 12},
+    {"id": 18, "name": "Surge Arrester", "category": "Protection", "lifespan": 20, "inspection_months": 60},
+    {"id": 19, "name": "Insulator", "category": "Protection", "lifespan": 40, "inspection_months": 60},
+    {"id": 20, "name": "Earthing System", "category": "Protection", "lifespan": 25, "inspection_months": 24},
+    {"id": 21, "name": "Hardwood Cross-Arm", "category": "Cross-Arms & Hardware", "lifespan": 25, "inspection_months": 60},
+    {"id": 22, "name": "Steel Cross-Arm", "category": "Cross-Arms & Hardware", "lifespan": 40, "inspection_months": 60},
+    {"id": 23, "name": "Fibreglass Cross-Arm", "category": "Cross-Arms & Hardware", "lifespan": 35, "inspection_months": 60},
+    {"id": 24, "name": "Street Light", "category": "Other", "lifespan": 20, "inspection_months": 24},
+    {"id": 25, "name": "Smart Meter", "category": "Metering", "lifespan": 15, "inspection_months": 60},
+    {"id": 26, "name": "Pillar Box", "category": "Other", "lifespan": 30, "inspection_months": 24},
+]
+
+# Map work order types to likely asset types
+WO_TYPE_TO_ASSET_TYPES = {
+    "Planned Maintenance": [1, 2, 3, 5, 6, 10, 13, 14, 20, 21, 22],
+    "Corrective Maintenance": [1, 2, 6, 7, 10, 13, 21, 22],
+    "Capital Works": [7, 10, 11, 12, 16, 17],
+    "Inspection": [1, 2, 3, 5, 6, 19, 21, 22],
+    "Emergency Response": [1, 2, 6, 10, 13],
+    "Vegetation Management": [1, 2, 6, 21, 22],
+    "Asset Replacement": [1, 2, 10, 13, 15, 17, 21, 22, 23],
+}
+
+VOLTAGE_LEVELS = ["LV (415V)", "11kV", "22kV", "33kV", "66kV"]
+VOLTAGE_WEIGHTS = [20, 50, 10, 15, 5]
+CONDITIONS = ["Good", "Fair", "Poor", "Critical"]
+CONDITION_WEIGHTS = [35, 40, 20, 5]
+
+STREET_NAMES = [
+    "Prince St", "Fitzroy St", "Clarence St", "Victoria St", "King St",
+    "Railway Parade", "Pacific Hwy", "Main Rd", "Church St", "Bridge St",
+    "River Rd", "Station St", "High St", "George St", "Smith St",
+    "Bent St", "Miller St", "Queen St", "Park Ave", "Hill St",
+]
+
 # Locations per depot for work order titles
 DEPOT_LOCATIONS = {
     "Grafton": ["Grafton", "South Grafton", "Junction Hill", "Ulmarra", "Maclean", "Yamba"],
@@ -323,32 +376,276 @@ DEPOT_LOCATIONS = {
 }
 
 
-def run_sql(statement: str, silent=False):
-    payload = json.dumps({"statement": statement, "warehouse_id": WAREHOUSE_ID, "wait_timeout": "50s"})
-    result = subprocess.run(
-        ["databricks", "api", "post", "/api/2.0/sql/statements/", "--json", payload, "--profile", PROFILE],
-        capture_output=True, text=True,
-    )
-    if result.stdout.strip():
-        try:
-            r = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            if not silent:
-                print(f"  JSON parse error: {result.stdout[:200]}")
-            return None
-        state = r.get("status", {}).get("state", "")
-        if state == "FAILED":
-            msg = r.get("status", {}).get("error", {}).get("message", "")
-            print(f"  SQL FAILED: {msg[:300]}")
-            return None
-        return r
-    if result.stderr and not silent:
-        print(f"  ERROR: {result.stderr[:200]}")
-    return None
-
-
 def is_workday(d: date) -> bool:
-    return d.weekday() < 5 and d not in EASTER_DATES and d not in NSW_HOLIDAYS
+    return d.weekday() < 5 and d not in EASTER_DATES and d not in PUBLIC_HOLIDAYS
+
+
+def create_tables():
+    """Create work_orders and work_tasks tables if they don't exist."""
+    print("\n=== Creating tables ===")
+
+    run_sql(f"CREATE SCHEMA IF NOT EXISTS {UC_FULL}")
+
+    run_sql(f"""
+        CREATE TABLE IF NOT EXISTS {UC_FULL}.work_orders (
+            id INT,
+            wo_number STRING,
+            project_id INT,
+            asset_id INT,
+            title STRING,
+            wo_type STRING,
+            priority STRING,
+            status STRING,
+            created_date DATE,
+            scheduled_date DATE,
+            completed_date DATE,
+            estimated_hours DOUBLE,
+            actual_hours DOUBLE,
+            assigned_crew STRING,
+            description STRING
+        )
+    """)
+    print("  work_orders table ready")
+
+    run_sql(f"""
+        CREATE TABLE IF NOT EXISTS {UC_FULL}.work_tasks (
+            id INT,
+            work_order_id INT,
+            task_number STRING,
+            sequence INT,
+            task_name STRING,
+            status STRING,
+            scheduled_datetime STRING,
+            completed_datetime STRING,
+            assigned_to STRING,
+            estimated_hours DOUBLE,
+            actual_hours DOUBLE,
+            notes STRING
+        )
+    """)
+    print("  work_tasks table ready")
+
+    run_sql(f"""
+        CREATE TABLE IF NOT EXISTS {UC_FULL}.asset_types (
+            id INT,
+            name STRING,
+            category STRING,
+            typical_lifespan_years INT,
+            inspection_interval_months INT
+        )
+    """)
+    print("  asset_types table ready")
+
+    run_sql(f"""
+        CREATE TABLE IF NOT EXISTS {UC_FULL}.assets (
+            id INT,
+            asset_number STRING,
+            asset_type STRING,
+            asset_category STRING,
+            location STRING,
+            address STRING,
+            latitude DOUBLE,
+            longitude DOUBLE,
+            install_date DATE,
+            condition_rating STRING,
+            last_inspection_date DATE,
+            next_inspection_due DATE,
+            voltage_level STRING,
+            image_path STRING
+        )
+    """)
+    print("  assets table ready")
+
+
+def generate_asset_types():
+    """Seed the asset_types lookup table."""
+    print("\n=== Seeding asset_types ===")
+    run_sql(f"DELETE FROM {UC_FULL}.asset_types WHERE id > 0")
+    values = []
+    for at in ASSET_TYPES:
+        values.append(f"({at['id']}, '{at['name']}', '{at['category']}', {at['lifespan']}, {at['inspection_months']})")
+    run_sql(f"INSERT INTO {UC_FULL}.asset_types VALUES {', '.join(values)}")
+    print(f"  {len(ASSET_TYPES)} asset types seeded")
+
+
+def generate_assets():
+    """Generate ~500 realistic network assets distributed across depots."""
+    print("\n=== Generating assets ===")
+    run_sql(f"DELETE FROM {UC_FULL}.assets WHERE id > 0")
+
+    all_assets = []
+    asset_id = 1
+
+    for depot, locations in DEPOT_LOCATIONS.items():
+        # Each depot gets 25-40 assets
+        n_assets = random.randint(25, 40)
+        for _ in range(n_assets):
+            at = random.choice(ASSET_TYPES)
+            loc = random.choice(locations)
+            street = random.choice(STREET_NAMES)
+            street_num = random.randint(1, 350)
+
+            # Get lat/lon from branding depots (approximate — add random offset)
+            depot_lower = depot.lower()
+            base_lat, base_lon = -30.0, 150.0  # fallback
+            for k, v in DEPOT_LOCATIONS.items():
+                if k == depot:
+                    # Use the depot location from branding
+                    from server.branding import DEPOTS as BRAND_DEPOTS
+                    dk = depot.lower()
+                    if dk in BRAND_DEPOTS:
+                        base_lat = BRAND_DEPOTS[dk]["lat"]
+                        base_lon = BRAND_DEPOTS[dk]["lon"]
+                    break
+            lat = round(base_lat + random.uniform(-0.1, 0.1), 4)
+            lon = round(base_lon + random.uniform(-0.1, 0.1), 4)
+
+            lifespan = at["lifespan"]
+            age = random.randint(1, lifespan)
+            install_year = 2026 - age
+            install_date = date(install_year, random.randint(1, 12), random.randint(1, 28))
+
+            condition = random.choices(CONDITIONS, weights=CONDITION_WEIGHTS)[0]
+            # Older assets more likely to be in poor condition
+            if age > lifespan * 0.8:
+                condition = random.choices(CONDITIONS, weights=[10, 30, 40, 20])[0]
+            elif age > lifespan * 0.6:
+                condition = random.choices(CONDITIONS, weights=[20, 40, 30, 10])[0]
+
+            insp_months = at["inspection_months"]
+            last_insp = date(2025, random.randint(1, 12), random.randint(1, 28))
+            next_insp = date(last_insp.year, last_insp.month, last_insp.day) + timedelta(days=insp_months * 30)
+
+            voltage = random.choices(VOLTAGE_LEVELS, weights=VOLTAGE_WEIGHTS)[0]
+
+            # Asset number prefix based on type
+            type_prefix = at["name"][:2].upper()
+            asset_number = f"{type_prefix}{depot[:2].upper()}-{asset_id:05d}"
+
+            all_assets.append({
+                "id": asset_id,
+                "asset_number": asset_number,
+                "asset_type": at["name"],
+                "asset_category": at["category"],
+                "location": loc,
+                "address": f"{street_num} {street}, {loc}",
+                "latitude": lat,
+                "longitude": lon,
+                "install_date": install_date.isoformat(),
+                "condition_rating": condition,
+                "last_inspection_date": last_insp.isoformat(),
+                "next_inspection_due": next_insp.isoformat(),
+                "voltage_level": voltage,
+                "image_path": f"/Volumes/{UC_FULL.replace('.', '/')}/asset_images/{at['name'].lower().replace(' ', '_')}.png",
+            })
+            asset_id += 1
+
+    # Insert in batches
+    batch_size = 50
+    for i in range(0, len(all_assets), batch_size):
+        batch = all_assets[i:i+batch_size]
+        values = []
+        for a in batch:
+            addr = a['address'].replace("'", "''")
+            values.append(
+                f"({a['id']}, '{a['asset_number']}', '{a['asset_type']}', '{a['asset_category']}', "
+                f"'{a['location']}', '{addr}', {a['latitude']}, {a['longitude']}, "
+                f"'{a['install_date']}', '{a['condition_rating']}', '{a['last_inspection_date']}', "
+                f"'{a['next_inspection_due']}', '{a['voltage_level']}', '{a['image_path']}')"
+            )
+        run_sql(f"INSERT INTO {UC_FULL}.assets VALUES {', '.join(values)}")
+        print(f"  Batch {i//batch_size + 1}: {len(batch)} assets")
+
+    print(f"  Total: {len(all_assets)} assets across {len(DEPOT_LOCATIONS)} depots")
+
+    # Build index for WO → asset linking
+    global _ASSET_INDEX
+    _ASSET_INDEX = {}
+    for a in all_assets:
+        key = a["location"]
+        _ASSET_INDEX.setdefault(key, []).append(a["id"])
+    # Also index by depot name
+    for depot, locs in DEPOT_LOCATIONS.items():
+        depot_ids = []
+        for loc in locs:
+            depot_ids.extend(_ASSET_INDEX.get(loc, []))
+        _ASSET_INDEX[depot] = depot_ids
+
+    return all_assets
+
+
+_ASSET_INDEX: dict[str, list[int]] = {}
+
+
+def _pick_asset_id(wo_type: str, depot: str) -> int:
+    """Pick a random asset ID from the depot, preferring matching type."""
+    depot_assets = _ASSET_INDEX.get(depot, [])
+    if depot_assets:
+        return random.choice(depot_assets)
+    # Fallback to any asset
+    all_ids = [aid for ids in _ASSET_INDEX.values() for aid in ids]
+    return random.choice(all_ids) if all_ids else 1
+
+
+def generate_asset_images():
+    """Generate placeholder PNG images for each asset type using Pillow."""
+    print("\n=== Generating asset images ===")
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        print("  Pillow not installed — skipping image generation")
+        print("  Install with: pip install Pillow")
+        return
+
+    import os
+    img_dir = os.path.join(os.path.dirname(__file__), "..", "asset_images")
+    os.makedirs(img_dir, exist_ok=True)
+
+    # Color map per category
+    category_colors = {
+        "Poles & Structures": "#2E86AB",
+        "Conductors & Cables": "#A23B72",
+        "Transformers": "#F18F01",
+        "Switchgear": "#C73E1D",
+        "Protection": "#3B1F2B",
+        "Metering": "#44BBA4",
+        "Cross-Arms & Hardware": "#8B6914",
+        "Other": "#6C757D",
+    }
+
+    for at in ASSET_TYPES:
+        name = at["name"]
+        category = at["category"]
+        color = category_colors.get(category, "#6C757D")
+
+        # Create a simple labeled placeholder image
+        img = Image.new("RGB", (400, 300), color)
+        draw = ImageDraw.Draw(img)
+
+        # White text area
+        draw.rectangle([20, 20, 380, 280], fill="#FFFFFF", outline=color, width=2)
+
+        # Asset type name
+        try:
+            font_large = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+            font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
+        except (OSError, IOError):
+            font_large = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+
+        draw.text((30, 40), name, fill=color, font=font_large)
+        draw.text((30, 80), f"Category: {category}", fill="#666666", font=font_small)
+        draw.text((30, 105), f"Lifespan: {at['lifespan']} years", fill="#666666", font=font_small)
+        draw.text((30, 130), f"Inspection: every {at['inspection_months']} months", fill="#666666", font=font_small)
+
+        # Placeholder icon area
+        draw.rectangle([30, 160, 370, 270], fill="#F8F9FA", outline="#DEE2E6")
+        draw.text((140, 205), "[Asset Photo]", fill="#ADB5BD", font=font_small)
+
+        filename = f"{name.lower().replace(' ', '_')}.png"
+        img.save(os.path.join(img_dir, filename))
+
+    print(f"  Generated {len(ASSET_TYPES)} placeholder images in {img_dir}/")
 
 
 def generate_work_orders():
@@ -436,7 +733,7 @@ def generate_work_orders():
                     "id": wo_id,
                     "wo_number": wo_number,
                     "project_id": random.randint(1, 120),
-                    "asset_id": random.randint(1, 14795),
+                    "asset_id": _pick_asset_id(wo_type, depot),
                     "title": title.replace("'", "''"),
                     "wo_type": wo_type,
                     "priority": priority,
@@ -533,7 +830,7 @@ def insert_work_orders(wos: list[dict]):
     print(f"\n=== Inserting {len(wos)} work orders ===")
 
     # Delete existing data in the future range to avoid duplicates
-    run_sql(f"DELETE FROM {SCHEMA}.work_orders WHERE id >= 10000")
+    run_sql(f"DELETE FROM {UC_FULL}.work_orders WHERE id >= 10000")
     print("  Cleared old generated data")
 
     batch_size = 50
@@ -552,7 +849,7 @@ def insert_work_orders(wos: list[dict]):
                 f"'{w['created_date']}', '{w['scheduled_date']}', {cd}, "
                 f"{w['estimated_hours']}, {ah}, '{crew}', '{desc}')"
             )
-        sql = f"INSERT INTO {SCHEMA}.work_orders VALUES {', '.join(values)}"
+        sql = f"INSERT INTO {UC_FULL}.work_orders VALUES {', '.join(values)}"
         result = run_sql(sql)
         if result is None:
             print(f"  Batch {i//batch_size + 1}: FAILED")
@@ -564,7 +861,7 @@ def insert_tasks(tasks: list[dict]):
     """Insert tasks in batches."""
     print(f"\n=== Inserting {len(tasks)} tasks ===")
 
-    run_sql(f"DELETE FROM {SCHEMA}.work_tasks WHERE id >= 50000")
+    run_sql(f"DELETE FROM {UC_FULL}.work_tasks WHERE id >= 50000")
     print("  Cleared old generated data")
 
     batch_size = 100
@@ -584,7 +881,7 @@ def insert_tasks(tasks: list[dict]):
                 f"'{t['scheduled_datetime']}', {cd}, '{assigned}', "
                 f"{t['estimated_hours']}, {ah}, {notes})"
             )
-        sql = f"INSERT INTO {SCHEMA}.work_tasks VALUES {', '.join(values)}"
+        sql = f"INSERT INTO {UC_FULL}.work_tasks VALUES {', '.join(values)}"
         result = run_sql(sql)
         if result is None:
             print(f"  Batch {i//batch_size + 1}: FAILED")
@@ -597,16 +894,16 @@ def optimize_tables():
     print("\n=== Optimizing tables ===")
 
     print("  Liquid clustering: work_orders (assigned_crew, scheduled_date)")
-    run_sql(f"ALTER TABLE {SCHEMA}.work_orders CLUSTER BY (assigned_crew, scheduled_date)")
+    run_sql(f"ALTER TABLE {UC_FULL}.work_orders CLUSTER BY (assigned_crew, scheduled_date)")
 
     print("  Liquid clustering: work_tasks (work_order_id, scheduled_datetime)")
-    run_sql(f"ALTER TABLE {SCHEMA}.work_tasks CLUSTER BY (work_order_id, scheduled_datetime)")
+    run_sql(f"ALTER TABLE {UC_FULL}.work_tasks CLUSTER BY (work_order_id, scheduled_datetime)")
 
     print("  OPTIMIZE work_orders...")
-    run_sql(f"OPTIMIZE {SCHEMA}.work_orders")
+    run_sql(f"OPTIMIZE {UC_FULL}.work_orders")
 
     print("  OPTIMIZE work_tasks...")
-    run_sql(f"OPTIMIZE {SCHEMA}.work_tasks")
+    run_sql(f"OPTIMIZE {UC_FULL}.work_tasks")
 
     print("  Done.")
 
@@ -620,16 +917,19 @@ def update_system_prompt_date_note():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Generating realistic WACS data for demo")
+    print("Generating realistic operations data for demo")
     print(f"Date range: 2026-03-01 to 2026-04-15")
     print(f"Easter break: 2026-04-03 to 2026-04-06")
     print("=" * 60)
 
+    create_tables()
+    generate_asset_types()
+    assets = generate_assets()
+    generate_asset_images()
     wos, tasks = generate_work_orders()
     insert_work_orders(wos)
     insert_tasks(tasks)
     optimize_tables()
-    update_system_prompt_date_note()
 
     print("\n=== Done ===")
-    print(f"Total: {len(wos)} work orders, {len(tasks)} tasks")
+    print(f"Total: {len(assets)} assets, {len(wos)} work orders, {len(tasks)} tasks")

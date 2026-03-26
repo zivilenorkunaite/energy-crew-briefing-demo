@@ -3,24 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Settings — EE Crew Briefing</title>
+  <title>Settings — Energy Crew Briefing</title>
   <style>
-    :root { --ee-navy: #1a365d; --ee-orange: #E07020; }
+    :root { --brand-primary: #1B4F72; --brand-accent: #E67E22; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #1a202c; }
-    .header { background: var(--ee-navy); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .header { background: var(--brand-primary); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
     .header h1 { font-size: 18px; font-weight: 600; }
     .header a { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px; }
     .header a:hover { color: white; }
     .container { max-width: 640px; margin: 32px auto; padding: 0 16px; }
     .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--ee-navy); }
+    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--brand-primary); }
     .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
     .setting-row:last-child { border-bottom: none; }
     .setting-label { font-size: 14px; font-weight: 500; }
     .setting-desc { font-size: 12px; color: #718096; margin-top: 2px; }
     .toggle { width: 44px; height: 24px; background: #cbd5e0; border-radius: 12px; cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
-    .toggle.active { background: var(--ee-navy); }
+    .toggle.active { background: var(--brand-primary); }
     .toggle::after { content: ''; width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform 0.2s; }
     .toggle.active::after { transform: translateX(20px); }
     .cache-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
@@ -58,13 +58,6 @@
         </div>
         <div class="toggle" id="streamToggle" onclick="toggleStream()"></div>
       </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">Scheduled cache warming</div>
-          <div class="setting-desc">Automatically pre-load cache at 6am and 6pm AEST</div>
-        </div>
-        <div class="toggle active" id="warmEnabledToggle" onclick="toggleWarmEnabled()"></div>
-      </div>
     </div>
 
     <!-- Cache Settings -->
@@ -77,36 +70,12 @@
         <button class="btn btn-all" onclick="confirmClearAll()">Clear All Cache</button>
       </div>
     </div>
-
-    <div style="text-align:center;padding:16px 0;">
-      <span id="warmLink" onclick="warmCache()" style="color:#a0aec0;font-size:12px;cursor:pointer;text-decoration:underline dotted;user-select:none;">Pre-load cache for all locations and dates</span>
-      <div id="warmProgress" style="display:none;margin-top:8px;font-size:12px;color:#718096;">
-        <div style="background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;margin:6px 0;">
-          <div id="warmBar" style="background:var(--ee-navy);height:100%;width:0%;transition:width 0.3s;border-radius:4px;"></div>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <span id="warmText">Starting...</span>
-          <span id="warmStop" onclick="stopWarm()" style="color:#e53e3e;cursor:pointer;font-size:11px;display:none;">Stop</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Warm History (hidden by default) -->
-    <div style="text-align:center;padding:4px 0;">
-      <span id="historyToggle" onclick="toggleHistory()" style="color:#a0aec0;font-size:11px;cursor:pointer;user-select:none;">Show warm history</span>
-    </div>
-    <div id="historySection" style="display:none;">
-      <div class="card">
-        <h2>Cache Warm History</h2>
-        <div id="historyList"><div class="empty">Loading...</div></div>
-      </div>
-    </div>
   </div>
 
   <script>
     const TOOL_LABELS = {
       'get_swms': { name: 'SWMS Knowledge Assistant', ttl: '24 hours' },
-      'query_genie': { name: 'Genie (WACS Database)', ttl: '2 hours' },
+      'query_genie': { name: 'Genie (Operations Database)', ttl: '2 hours' },
       'search_local_notices': { name: 'Web Search (Local Notices)', ttl: '2 hours' },
       'query_weather': { name: 'Weather', ttl: '30 minutes' },
     };
@@ -118,7 +87,6 @@
         const res = await fetch('/api/settings');
         settings = await res.json();
         document.getElementById('streamToggle').classList.toggle('active', settings.stream_response === 'true');
-        document.getElementById('warmEnabledToggle').classList.toggle('active', settings.warm_enabled !== 'false');
       } catch (e) {}
     }
     async function setSetting(key, value) {
@@ -134,14 +102,7 @@
       const active = !document.getElementById('streamToggle').classList.contains('active');
       document.getElementById('streamToggle').classList.toggle('active', active);
       setSetting('stream_response', active);
-      localStorage.setItem('streamMode', active); // also sync to localStorage for chat page
-    }
-
-    function toggleWarmEnabled() {
-      const active = !document.getElementById('warmEnabledToggle').classList.contains('active');
-      document.getElementById('warmEnabledToggle').classList.toggle('active', active);
-      setSetting('warm_enabled', active);
-      showStatus(active ? 'Scheduled warming enabled' : 'Scheduled warming disabled', true);
+      localStorage.setItem('streamMode', active);
     }
     loadSettings();
 
@@ -222,177 +183,6 @@
     }
 
     loadStats();
-
-    // Warm cache — triggers server-side, monitors via history API
-    async function warmCache() {
-      const link = document.getElementById('warmLink');
-      const prog = document.getElementById('warmProgress');
-      try {
-        const res = await fetch('/api/cache/warm', { method: 'POST' });
-        const data = await res.json();
-        if (data.ok) {
-          link.textContent = 'Warming cache...';
-          link.style.color = '#718096';
-          prog.style.display = 'block';
-          document.getElementById('warmText').textContent = 'Starting...';
-          document.getElementById('warmStop').style.display = 'inline';
-          // Poll progress via history
-          pollWarmProgress();
-        } else {
-          showStatus(data.error || 'Could not start warming', false);
-        }
-      } catch (e) {
-        showStatus('Error: ' + e.message, false);
-      }
-    }
-
-    let warmPollTimer = null;
-    function pollWarmProgress() {
-      if (warmPollTimer) clearInterval(warmPollTimer);
-      warmPollTimer = setInterval(async () => {
-        try {
-          const res = await fetch('/api/cache/warm/history');
-          const data = await res.json();
-          const latest = (data.history || [])[0];
-          if (!latest) return;
-
-          const bar = document.getElementById('warmBar');
-          const text = document.getElementById('warmText');
-          const prog = document.getElementById('warmProgress');
-          const link = document.getElementById('warmLink');
-          const stop = document.getElementById('warmStop');
-
-          if (latest.status === 'running') {
-            const pct = latest.total > 0 ? Math.round(latest.done / latest.total * 100) : 0;
-            bar.style.width = pct + '%';
-            text.textContent = `${latest.phase}: ${latest.done}/${latest.total} (${latest.skipped} cached, ${latest.errors} errors)`;
-            prog.style.display = 'block';
-            stop.style.display = 'inline';
-          } else {
-            clearInterval(warmPollTimer); warmPollTimer = null;
-            stop.style.display = 'none';
-            if (latest.status === 'done') {
-              link.textContent = 'Cache warmed';
-              link.style.color = '#276749';
-              text.textContent = `Done: ${latest.before} → ${latest.after} in ${latest.duration_s}s`;
-            } else {
-              link.textContent = latest.status === 'cancelled' ? 'Warming cancelled' : 'Warming finished';
-              link.style.color = '#b45309';
-            }
-            setTimeout(() => { link.textContent = 'Pre-load cache for all locations and dates'; link.style.color = '#a0aec0'; prog.style.display = 'none'; bar.style.width = '0%'; }, 5000);
-            loadStats();
-            if (historyVisible) loadHistory();
-          }
-        } catch (e) {}
-      }, 3000);
-    }
-
-    function stopWarm() {
-      fetch('/api/cache/warm/stop', { method: 'POST' });
-      document.getElementById('warmStop').style.display = 'none';
-      document.getElementById('warmText').textContent = 'Stopping...';
-      if (warmPollTimer) { clearInterval(warmPollTimer); warmPollTimer = null; }
-      setTimeout(() => {
-        document.getElementById('warmProgress').style.display = 'none';
-        document.getElementById('warmLink').textContent = 'Pre-load cache for all locations and dates';
-        document.getElementById('warmLink').style.color = '#a0aec0';
-        loadStats();
-        if (historyVisible) loadHistory();
-      }, 3000);
-    }
-
-    // Check if warming is running on page load
-    async function checkWarmRunning() {
-      try {
-        const res = await fetch('/api/cache/warm/history');
-        const data = await res.json();
-        const latest = (data.history || [])[0];
-        if (latest && latest.status === 'running') pollWarmProgress();
-      } catch (e) {}
-    }
-    checkWarmRunning();
-    // Warm history
-    let historyVisible = false;
-    function toggleHistory() {
-      historyVisible = !historyVisible;
-      document.getElementById('historySection').style.display = historyVisible ? 'block' : 'none';
-      document.getElementById('historyToggle').textContent = historyVisible ? 'Hide warm history' : 'Show warm history';
-      if (historyVisible) loadHistory();
-    }
-
-    async function loadHistory() {
-      try {
-        const res = await fetch('/api/cache/warm/history');
-        const data = await res.json();
-        renderHistory(data.history || []);
-      } catch (e) {
-        document.getElementById('historyList').innerHTML = '<div class="empty">Could not load history</div>';
-      }
-    }
-
-    let historyTimer = null;
-
-    function renderHistory(history) {
-      const el = document.getElementById('historyList');
-      if (!history.length) {
-        el.innerHTML = '<div class="empty">No warm runs yet</div>';
-        return;
-      }
-      const hasRunning = history.some(r => r.status === 'running');
-      let html = '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-      html += '<tr style="border-bottom:1px solid #e2e8f0;color:#718096;"><th style="text-align:left;padding:6px 4px;">Time</th><th>Trigger</th><th>Progress</th><th>Before</th><th>After</th><th>Duration</th><th>Status</th></tr>';
-      for (const r of history) {
-        const isRunning = r.status === 'running';
-        const statusColor = r.status === 'done' ? '#276749' : r.status.startsWith('skip') ? '#718096' : isRunning ? '#2b6cb0' : r.status === 'cancelled' ? '#b45309' : '#c53030';
-        const dur = r.duration_s > 0 ? `${Math.round(r.duration_s)}s` : '—';
-        const before = r.before != null ? r.before : '—';
-        const after = r.after != null ? r.after : '—';
-
-        let progress = '—';
-        if (isRunning && r.total > 0) {
-          const pct = Math.round(r.done / r.total * 100);
-          progress = '<div style="display:flex;align-items:center;gap:4px;">' +
-            '<div style="background:#e2e8f0;border-radius:3px;height:4px;width:60px;overflow:hidden;">' +
-            '<div style="background:#2b6cb0;height:100%;width:' + pct + '%;border-radius:3px;"></div></div>' +
-            '<span>' + r.done + '/' + r.total + ' (' + r.phase + ')</span></div>';
-        } else if (r.total > 0) {
-          progress = r.done + '/' + r.total;
-        }
-
-        let statusHtml = `<span style="color:${statusColor};font-weight:500;">${r.status}</span>`;
-        if (isRunning) {
-          statusHtml += ` <span onclick="stopBackgroundWarm()" style="color:#e53e3e;cursor:pointer;font-size:10px;text-decoration:underline;">stop</span>`;
-        }
-
-        html += '<tr style="border-bottom:1px solid #f0f0f0;">' +
-          '<td style="padding:5px 4px;white-space:nowrap;">' + (r.start || '—') + '</td>' +
-          '<td style="padding:5px 4px;text-align:center;">' + (r.trigger || '—') + '</td>' +
-          '<td style="padding:5px 4px;">' + progress + '</td>' +
-          '<td style="padding:5px 4px;text-align:center;">' + before + '</td>' +
-          '<td style="padding:5px 4px;text-align:center;">' + after + '</td>' +
-          '<td style="padding:5px 4px;text-align:center;">' + dur + '</td>' +
-          '<td style="padding:5px 4px;text-align:center;">' + statusHtml + '</td></tr>';
-      }
-      html += '</table>';
-      el.innerHTML = html;
-
-      // Auto-refresh while running
-      if (hasRunning && historyVisible) {
-        if (!historyTimer) historyTimer = setInterval(loadHistory, 3000);
-      } else {
-        if (historyTimer) { clearInterval(historyTimer); historyTimer = null; }
-      }
-    }
-
-    async function stopBackgroundWarm() {
-      try {
-        await fetch('/api/cache/warm/stop', { method: 'POST' });
-        showStatus('Warm cancelled', true);
-        setTimeout(loadHistory, 2000);
-      } catch (e) {
-        showStatus('Error stopping', false);
-      }
-    }
   </script>
 </body>
 </html>

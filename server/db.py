@@ -11,7 +11,7 @@ from typing import Optional, List, Any
 SCHEMA = os.environ.get("PGSCHEMA", "public")
 _ENDPOINT_NAME = os.environ.get(
     "ENDPOINT_NAME",
-    "projects/ee-crew-briefing-as/branches/production/endpoints/primary",
+    "projects/energy-crew-briefing-as/branches/production/endpoints/primary",
 )
 
 

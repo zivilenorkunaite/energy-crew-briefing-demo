@@ -1,32 +1,26 @@
 command: ['python', '-m', 'uvicorn', 'app:app', '--host', '0.0.0.0', '--port', '8000']
 env:
-  - name: AI_GATEWAY_URL
-    value: 'https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions'
   - name: LLM_MODEL
-    value: 'crew-briefing-llm'
+    value: 'databricks-claude-sonnet-4-6'
   - name: SUPERVISOR_MODEL
-    value: 'crew-briefing-small-and-fast-llm'
+    value: 'databricks-claude-sonnet-4-6'
   - name: GENIE_SPACE_ID
     valueFrom: 'genie-field-ops'
   - name: SWMS_ENDPOINT
     value: 'swms-knowledge-assistant-v2'
   - name: TAVILY_API_KEY
     valueFrom: 'tavily-api-key'
-  - name: PGHOST
-    value: 'ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com'
   - name: PGDATABASE
     value: 'databricks_postgres'
   - name: PGPORT
     value: '5432'
   - name: PGSSLMODE
     value: 'require'
-  - name: ENDPOINT_NAME
-    value: 'projects/ee-crew-briefing-as/branches/production/endpoints/primary'
   - name: MLFLOW_TRACING_DESTINATION
-    value: 'zivile.essential_energy_wacs'
+    value: 'main.energy_crew_briefing'
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
     valueFrom: 'sql-warehouse'
   - name: MLFLOW_EXPERIMENT
-    value: '/Shared/ee-crew-briefing-traces-uc'
+    value: '/Shared/energy-crew-briefing-traces-uc'
   - name: AGENT_VERSION
     value: 'v4'

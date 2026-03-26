@@ -1,126 +1,132 @@
 #!/bin/bash
-# Deploy EE Crew Briefing via Databricks Asset Bundles
-# Bundle handles: app, env vars, serving endpoint + secret + warehouse permissions, jobs
-# This script handles: Lakebase + Genie resources (not supported in bundles), setup scripts
+# Deploy Energy Crew Briefing via Databricks Asset Bundles
 #
-# Usage: ./deploy.sh [--setup]
+# Usage:
+#   DATABRICKS_PROFILE=azure-aus ./deploy.sh --setup  — first-time setup + deploy
+#   DATABRICKS_PROFILE=azure-aus ./deploy.sh           — code deploy only
+#
+# Teardown: DATABRICKS_PROFILE=azure-aus ./teardown.sh --confirm
 set -euo pipefail
 
 PROFILE="${DATABRICKS_PROFILE:-DEFAULT}"
-APP_NAME="ee-crew-briefing"
+APP_NAME="energy-crew-briefing"
+SECRET_SCOPE="energy-crew-briefing"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== EE Crew Briefing — Deploy ==="
+echo "=== Energy Crew Briefing — Deploy (profile: $PROFILE) ==="
 
 # ── Handle flags ──────────────────────────────────────────────────────
 RUN_SETUP=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --setup)
-            RUN_SETUP=true
-            shift
-            ;;
-        *)
-            shift
-            ;;
+        --setup) RUN_SETUP=true; shift ;;
+        *) shift ;;
     esac
 done
 
-# ── Run setup scripts (first-time only) ──────────────────────────────
+# Export profile so all Python setup scripts pick it up
+export DATABRICKS_PROFILE="$PROFILE"
+
+# ── First-time setup ─────────────────────────────────────────────────
 if $RUN_SETUP; then
     echo ""
-    echo "Running setup scripts..."
-    echo "--- Phase 1: Vector Search ---"
-    python3 "$SCRIPT_DIR/setup/01_vector_search.py"
+    echo "=== First-time setup (10 phases) ==="
+
     echo ""
-    echo "--- Phase 2: Lakebase ---"
+    echo "--- Phase 1: Prerequisites (secret scope + UC catalog) ---"
+    databricks secrets create-scope "$SECRET_SCOPE" --profile "$PROFILE" 2>/dev/null \
+        && echo "  Created scope '$SECRET_SCOPE'" \
+        || echo "  Scope '$SECRET_SCOPE' already exists"
+
+    # Verify UC catalog exists (create if possible, warn if not)
+    UC_CATALOG=$(python3 -c "from server.branding import UC_CATALOG; print(UC_CATALOG)")
+    if databricks api get "/api/2.1/unity-catalog/catalogs/$UC_CATALOG" --profile "$PROFILE" >/dev/null 2>&1; then
+        echo "  Catalog '$UC_CATALOG' exists"
+    else
+        databricks api post /api/2.1/unity-catalog/catalogs \
+            --json "{\"name\": \"$UC_CATALOG\", \"comment\": \"Energy Crew Briefing demo\"}" \
+            --profile "$PROFILE" 2>/dev/null \
+            && echo "  Created catalog '$UC_CATALOG'" \
+            || echo "  WARNING: Cannot create catalog '$UC_CATALOG'. Ask a metastore admin to create it."
+    fi
+
+    echo ""
+    echo "--- Phase 2: Lakebase (instance + database + tables) ---"
     python3 "$SCRIPT_DIR/setup/02_lakebase.py"
+
     echo ""
-    echo "--- Phase 3: BOM Weather ---"
+    echo "--- Phase 3: SWMS Documents (seed Delta table) ---"
+    python3 "$SCRIPT_DIR/setup/11_seed_swms.py"
+
+    echo ""
+    echo "--- Phase 4: Vector Search (endpoint + index) ---"
+    python3 "$SCRIPT_DIR/setup/01_vector_search.py"
+
+    echo ""
+    echo "--- Phase 5: BOM Weather (table + UC function + data) ---"
     python3 "$SCRIPT_DIR/setup/03_bom_weather.py"
+
     echo ""
-    echo "--- Phase 4: MLflow Experiment ---"
+    echo "--- Phase 6: MLflow Experiment ---"
     python3 "$SCRIPT_DIR/setup/04_mlflow_experiment.py"
+
+    echo ""
+    echo "--- Phase 7: Demo Data (assets + work orders + tasks) ---"
+    python3 "$SCRIPT_DIR/setup/05_realistic_data.py"
+
+    echo ""
+    echo "--- Phase 8: Genie Room ---"
+    python3 "$SCRIPT_DIR/setup/12_genie_room.py"
+
+    echo ""
+    echo "--- Phase 9: SWMS Serving Endpoint ---"
+    python3 "$SCRIPT_DIR/setup/06_swms_agent.py"
+
+    echo ""
+    echo "--- Phase 10: Prompt Registry ---"
+    python3 "$SCRIPT_DIR/setup/08_prompt_registry.py"
+
+    echo ""
+    echo "--- Updating config with discovered resource IDs ---"
+    python3 "$SCRIPT_DIR/setup/99_update_config.py"
+
+    echo ""
+    echo "=== Setup complete ==="
+    echo ""
+    echo "MANUAL STEP REMAINING:"
+    echo "  Put Tavily API key in secret scope:"
+    echo "  databricks secrets put-secret $SECRET_SCOPE tavily-api-key --profile $PROFILE"
     echo ""
 fi
 
-# ── Bundle deploy (app + jobs + permissions) ──────────────────────────
+# ── Bundle deploy ─────────────────────────────────────────────────────
 echo "Running bundle deploy..."
 cd "$SCRIPT_DIR"
 databricks bundle deploy --profile "$PROFILE"
 echo "Bundle deployed"
 
-# ── Add resources not supported by bundles (Lakebase + Genie) ─────────
-echo "Adding Lakebase + Genie resources via API..."
-python3 -c "
-from databricks.sdk import WorkspaceClient
-import json, urllib.request
-
-w = WorkspaceClient(profile='$PROFILE')
-host = w.config.host
-token = w.config.token or w.config.authenticate().get('Authorization','').replace('Bearer ','')
-
-# Get current resources
-req = urllib.request.Request(f'{host}/api/2.0/apps/$APP_NAME',
-    headers={'Authorization': f'Bearer {token}'})
-app = json.loads(urllib.request.urlopen(req).read())
-current = {r['name']: r for r in app.get('resources', [])}
-
-# Only add postgres/genie if not already present
-need_update = False
-resources = list(app.get('resources', []))
-
-if 'postgres' not in current:
-    resources.append({
-        'name': 'postgres',
-        'description': 'Lakebase Autoscaling for session persistence',
-        'postgres': {
-            'branch': 'projects/ee-crew-briefing-as/branches/production',
-            'database': 'projects/ee-crew-briefing-as/branches/production/databases/db-i1ri-fqtfd0d6tm',
-            'permission': 'CAN_CONNECT_AND_CREATE'
-        }
-    })
-    need_update = True
-    print('  Adding postgres resource')
-
-if 'genie-room' not in current and 'genie-room-field-ops' not in current:
-    resources.append({
-        'name': 'genie-room',
-        'description': 'Genie Room — Field Operations',
-        'genie': {
-            'space_id': '01f111b05416164989106b097e2f7d21',
-            'permission': 'CAN_RUN'
-        }
-    })
-    need_update = True
-    print('  Adding genie-room resource')
-
-if need_update:
-    req = urllib.request.Request(f'{host}/api/2.0/apps/$APP_NAME',
-        data=json.dumps({'resources': resources}).encode(),
-        method='PATCH',
-        headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-    try:
-        resp = json.loads(urllib.request.urlopen(req).read())
-        print(f'  {len(resp.get(\"resources\",[]))} resources total')
-    except Exception as e:
-        error = e.read().decode() if hasattr(e,'read') else str(e)
-        print(f'  Warning: resource update failed: {error[:200]}')
-        print('  (postgres/genie may not be supported via API — SP permissions may already exist)')
-else:
-    print('  Lakebase + Genie resources already present')
-"
+# ── Postgres resource (not supported in DABs) ─────────────────────────
 echo ""
+echo "Adding Lakebase postgres resource..."
+python3 "$SCRIPT_DIR/setup/13_postgres_resource.py"
 
-# ── Deploy the app (triggers restart with new code) ───────────────────
-BUNDLE_PATH="/Workspace/Users/zivile.norkunaite@databricks.com/.bundle/ee-crew-briefing/default/files"
-echo "Deploying app from bundle path..."
+# ── App deploy (restart with new code) ────────────────────────────────
+echo ""
+# Discover the bundle path from the current user
+USER_EMAIL=$(databricks auth describe --profile "$PROFILE" 2>/dev/null | grep "User:" | awk '{print $2}')
+if [ -z "$USER_EMAIL" ]; then
+    USER_EMAIL=$(python3 -c "from databricks.sdk import WorkspaceClient; w=WorkspaceClient(profile='$PROFILE'); print(w.current_user.me().user_name)")
+fi
+BUNDLE_PATH="/Workspace/Users/${USER_EMAIL}/.bundle/energy-crew-briefing/default/files"
+
+echo "Deploying app from: $BUNDLE_PATH"
 databricks apps deploy "$APP_NAME" \
     --source-code-path "$BUNDLE_PATH" \
     --profile "$PROFILE"
 
 echo ""
 echo "=== Deploy complete ==="
-echo "App URL: https://${APP_NAME}-1313663707993479.aws.databricksapps.com"
-echo ""
-echo "First-time setup: ./deploy.sh --setup"
+# Get workspace host for app URL
+HOST=$(databricks auth describe --profile "$PROFILE" 2>/dev/null | grep "Host:" | awk '{print $2}' | sed 's|https://||')
+echo "Workspace: $HOST"
+echo "App: https://${APP_NAME}-*.databricksapps.com (check Databricks UI for exact URL)"

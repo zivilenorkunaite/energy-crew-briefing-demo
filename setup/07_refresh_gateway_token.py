@@ -10,7 +10,7 @@ import requests
 import json
 
 ENDPOINT_NAME = "crew-briefing-agent"
-SECRET_SCOPE = "ee-crew-briefing"
+SECRET_SCOPE = "energy-crew-briefing"
 SECRET_KEY = "gateway-token"
 PAT_COMMENT = "crew-briefing-agent-auto"
 

@@ -9,18 +9,24 @@ Run with: python3 setup/06_swms_agent.py
 
 import mlflow
 import os
+import sys
 import yaml
 
-os.environ.setdefault("DATABRICKS_HOST", "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com")
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import get_host, get_warehouse_id, UC_FULL
 
-EXPERIMENT_PATH = "/Users/zivile.norkunaite@databricks.com/ee-crew-briefing-traces"
-MODEL_NAME = "zivile.essential_energy_wacs.swms_knowledge_assistant"
+os.environ.setdefault("DATABRICKS_HOST", get_host())
+
+EXPERIMENT_PATH = "/Shared/energy-crew-briefing-traces-uc"
+MODEL_NAME = f"{UC_FULL}.swms_knowledge_assistant"
 ENDPOINT_NAME = "swms-knowledge-assistant-v2"
-TABLE = "zivile.essential_energy_wacs.swms_documents"
-AI_GATEWAY_URL = "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions"
+TABLE = f"{UC_FULL}.swms_documents"
+WORKSPACE_HOST = get_host()
+WAREHOUSE_ID = get_warehouse_id()
+# AI Gateway URL — derived from workspace instance ID
+_instance_id = WORKSPACE_HOST.split("//")[1].split(".")[0].replace("adb-", "")
+AI_GATEWAY_URL = f"https://{_instance_id}.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions"
 LLM_MODEL = "databricks-claude-sonnet-4-6"
-WORKSPACE_HOST = "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com"
-WAREHOUSE_ID = "c2abb17a6c9e6bc0"
 
 mlflow.set_experiment(EXPERIMENT_PATH)
 
@@ -42,7 +48,7 @@ class SWMSKnowledgeAssistantV3(PythonModel):
     """
 
     SYSTEM_PROMPT = (
-        "You are the Essential Energy SWMS Knowledge Assistant. Answer safety questions "
+        "You are the SWMS Knowledge Assistant. Answer safety questions "
         "using ONLY the SWMS content provided below.\n\n"
         "Rules:\n"
         "- Cite the specific SWMS document (e.g. SWMS-001) and section title for every point.\n"
@@ -61,6 +67,9 @@ class SWMSKnowledgeAssistantV3(PythonModel):
         "SWMS-005 Inspection",
         "SWMS-006 Planned Maintenance",
         "SWMS-007 Vegetation Management",
+        "SWMS-008 Underground Cable",
+        "SWMS-009 Metering",
+        "SWMS-010 Substation Work",
     ]
 
     def load_context(self, context):
@@ -136,6 +145,9 @@ class SWMSKnowledgeAssistantV3(PythonModel):
             "SWMS-005 Inspection": ["inspection", "audit", "patrol", "check", "drone"],
             "SWMS-006 Planned Maintenance": ["planned", "maintenance", "routine", "scheduled", "ppe", "isolation", "overhead", "line"],
             "SWMS-007 Vegetation Management": ["vegetation", "tree", "trim", "clearing", "veg"],
+            "SWMS-008 Underground Cable": ["underground", "cable", "trench", "jointing", "xlpe", "pilc"],
+            "SWMS-009 Metering": ["meter", "metering", "smart meter", "ct meter", "solar meter", "disconnection"],
+            "SWMS-010 Substation Work": ["substation", "zone sub", "switching", "circuit breaker", "hv", "high voltage", "sf6", "battery"],
         }
 
         for doc_name, keywords in mapping.items():
@@ -272,7 +284,7 @@ w.serving_endpoints.update_config(
         scale_to_zero_enabled=True,
         environment_vars={
             "DATABRICKS_HOST": WORKSPACE_HOST,
-            "DATABRICKS_TOKEN": "{{secrets/ee-crew-briefing/gateway-token}}",
+            "DATABRICKS_TOKEN": "{{secrets/energy-crew-briefing/gateway-token}}",
         },
     )],
 )

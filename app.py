@@ -1,4 +1,4 @@
-"""EE Crew Briefing — FastAPI Application with SSE streaming."""
+"""Energy Crew Briefing — FastAPI Application with SSE streaming."""
 
 import asyncio
 import json
@@ -26,71 +26,15 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from server.agent import run_agent
+from server.branding import (
+    APP_TITLE, COMPANY_NAME, PAGE_TITLE, APP_DISPLAY, APP_SUBTITLE,
+    COLOR_PRIMARY, COLOR_PRIMARY_LIGHT, COLOR_ACCENT, COLOR_ACCENT_LIGHT, COLOR_USER_BG,
+)
 
 
 # ── Background tasks ──────────────────────────────────────────────────────
 
 _token_refresh_task: Optional[asyncio.Task] = None
-_cache_warm_task: Optional[asyncio.Task] = None
-_warm_cancel = False
-MAX_WARM_HISTORY = 20
-_run_warm_ref = None  # set in _cache_warm_loop
-
-
-async def _warm_history_insert(record: dict) -> int:
-    """Insert a warm history record, return its ID."""
-    from server.db import db
-    try:
-        row_id = await db.fetchval(
-            """INSERT INTO warm_history (trigger, start_time, status, before_count, phase, done, total, skipped, errors)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id""",
-            record.get("trigger"), record.get("start"), record.get("status", "running"),
-            record.get("before", 0), record.get("phase", "starting"),
-            record.get("done", 0), record.get("total", 0),
-            record.get("skipped", 0), record.get("errors", 0),
-        )
-        return row_id
-    except Exception as e:
-        print(f"[WARM] History insert error: {e}")
-        return 0
-
-
-async def _warm_history_update(row_id: int, record: dict):
-    """Update a warm history record."""
-    from server.db import db
-    try:
-        await db.execute(
-            """UPDATE warm_history SET status=$1, phase=$2, done=$3, total=$4,
-               skipped=$5, errors=$6, end_time=$7, duration_s=$8,
-               after_count=$9 WHERE id=$10""",
-            record.get("status"), record.get("phase"), record.get("done", 0),
-            record.get("total", 0), record.get("skipped", 0), record.get("errors", 0),
-            record.get("end"), record.get("duration_s"), record.get("after"),
-            row_id,
-        )
-    except Exception as e:
-        print(f"[WARM] History update error: {e}")
-
-
-async def _warm_history_list() -> list[dict]:
-    """Get recent warm history from Lakebase."""
-    from server.db import db
-    try:
-        rows = await db.fetch(
-            f"SELECT * FROM warm_history ORDER BY id DESC LIMIT {MAX_WARM_HISTORY}"
-        )
-        return [
-            {
-                "trigger": r["trigger"], "start": r["start_time"], "end": r["end_time"],
-                "duration_s": r["duration_s"], "before": r["before_count"], "after": r["after_count"],
-                "done": r["done"], "total": r["total"], "skipped": r["skipped"],
-                "errors": r["errors"], "phase": r["phase"], "status": r["status"],
-            }
-            for r in rows
-        ]
-    except Exception as e:
-        print(f"[WARM] History list error: {e}")
-        return []
 
 
 async def _refresh_loop():
@@ -105,142 +49,15 @@ async def _refresh_loop():
             print(f"[APP] Token refresh failed: {e}")
 
 
-async def _cache_warm_loop():
-    """Run cache warming at 6am and 6pm Sydney time."""
-    from server.warm_cache import warm_cache
-    from server.cache import get_cache_stats
-    try:
-        from zoneinfo import ZoneInfo
-        syd = ZoneInfo("Australia/Sydney")
-    except Exception:
-        from datetime import timezone, timedelta
-        syd = timezone(timedelta(hours=11))
-
-    from datetime import datetime
-
-    TARGET_HOURS = {6, 18}
-    CHECK_INTERVAL = 300  # check every 5 min
-    MIN_CACHE_PCT = 0.80
-    EXPECTED_TOTAL = 466  # 7 + 209 + 19 + 231
-
-    last_warm_hour = None
-    import time as _time
-
-    async def _run_warm(trigger: str):
-        """Run warming and record to Lakebase history."""
-        global _warm_cancel, _run_warm_ref
-        _warm_cancel = False
-        start = _time.time()
-        now_str = datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST")
-
-        stats_before = await get_cache_stats()
-        before_total = sum(s.get("count", 0) for s in stats_before)
-
-        record = {
-            "trigger": trigger, "start": now_str, "before": before_total,
-            "status": "running", "phase": "starting", "done": 0, "total": 0,
-            "skipped": 0, "errors": 0, "after": None, "duration_s": None, "end": None,
-        }
-        row_id = await _warm_history_insert(record)
-
-        try:
-            async for progress in warm_cache():
-                record["phase"] = progress.get("phase", "")
-                record["done"] = progress.get("done", 0)
-                record["total"] = progress.get("total", 0)
-                record["skipped"] = progress.get("skipped", 0)
-                record["errors"] = progress.get("errors", 0)
-                record["duration_s"] = round(_time.time() - start, 1)
-
-                # Update DB every ~10% or on phase change
-                if row_id:
-                    await _warm_history_update(row_id, record)
-
-                if progress.get("phase") == "done":
-                    print(f"[WARM] {trigger}: {progress.get('done')}/{progress.get('total')} ({progress.get('skipped')} cached, {progress.get('errors')} errors)")
-
-                if _warm_cancel:
-                    print(f"[WARM] {trigger}: cancelled by user")
-                    record["status"] = "cancelled"
-                    break
-        except Exception as e:
-            record["status"] = f"error: {e}"
-            print(f"[WARM] {trigger} error: {e}")
-            if row_id:
-                await _warm_history_update(row_id, record)
-            return
-
-        stats_after = await get_cache_stats()
-        after_total = sum(s.get("count", 0) for s in stats_after)
-        elapsed = round(_time.time() - start, 1)
-
-        record.update({
-            "end": datetime.now(syd).strftime("%Y-%m-%d %H:%M AEST"),
-            "duration_s": elapsed,
-            "after": after_total,
-        })
-        if record["status"] == "running":
-            record["status"] = "done"
-        if row_id:
-            await _warm_history_update(row_id, record)
-        print(f"[WARM] {trigger}: {before_total} → {after_total} in {elapsed}s")
-
-    from server.settings import get_bool
-
-    # Expose _run_warm for the manual API endpoint
-    global _run_warm_ref
-    _run_warm_ref = _run_warm
-
-    # No warm on startup — only on schedule (6am/6pm) or manual button
-    print("[WARM] Cache warm loop started — scheduled at 6am/6pm AEST, or trigger manually")
-
-    while True:
-        await asyncio.sleep(CHECK_INTERVAL)
-        try:
-            if not await get_bool("warm_enabled", True):
-                continue
-
-            now = datetime.now(syd)
-            current_hour = now.hour
-
-            if current_hour in TARGET_HOURS and last_warm_hour != current_hour:
-                last_warm_hour = current_hour
-
-                stats = await get_cache_stats()
-                total = sum(s.get("count", 0) for s in stats)
-                pct = total / EXPECTED_TOTAL if EXPECTED_TOTAL > 0 else 0
-
-                if pct >= MIN_CACHE_PCT:
-                    print(f"[WARM] Cache at {pct:.0%} ({total}/{EXPECTED_TOTAL}) — skipping")
-                    skip_record = {
-                        "trigger": f"scheduled {current_hour}:00",
-                        "start": now.strftime("%Y-%m-%d %H:%M AEST"),
-                        "status": f"skipped ({pct:.0%} full)",
-                        "before": total, "after": total,
-                    }
-                    row_id = await _warm_history_insert(skip_record)
-                    if row_id:
-                        skip_record["end"] = skip_record["start"]
-                        skip_record["duration_s"] = 0
-                        await _warm_history_update(row_id, skip_record)
-                    continue
-
-                await _run_warm(f"scheduled {current_hour}:00")
-
-        except Exception as e:
-            print(f"[WARM] Loop error: {e}")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Init DB pool, start background tasks, clean up on shutdown."""
-    global _token_refresh_task, _cache_warm_task
+    global _token_refresh_task
     try:
         from server.db import db
         await db.get_pool()
         _token_refresh_task = asyncio.create_task(_refresh_loop())
-        _cache_warm_task = asyncio.create_task(_cache_warm_loop())
-        print("[APP] Lakebase connected, token refresh + cache warm scheduled")
+        print("[APP] Lakebase connected, token refresh scheduled")
     except Exception as e:
         print(f"[APP] Lakebase init failed (sessions will not persist): {e}")
 
@@ -248,8 +65,6 @@ async def lifespan(app: FastAPI):
 
     if _token_refresh_task:
         _token_refresh_task.cancel()
-    if _cache_warm_task:
-        _cache_warm_task.cancel()
     try:
         from server.db import db
         await db.close()
@@ -258,7 +73,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="EE Crew Briefing",
+    title=APP_TITLE,
     version="2.0.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
@@ -397,7 +212,25 @@ async def delete_session(session_id: str):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "healthy", "app": "EE Crew Briefing"}
+    return {"status": "healthy", "app": APP_TITLE}
+
+
+@app.get("/api/branding")
+async def branding():
+    return {
+        "company_name": COMPANY_NAME,
+        "app_title": APP_TITLE,
+        "app_display": APP_DISPLAY,
+        "app_subtitle": APP_SUBTITLE,
+        "page_title": PAGE_TITLE,
+        "colors": {
+            "primary": COLOR_PRIMARY,
+            "primary_light": COLOR_PRIMARY_LIGHT,
+            "accent": COLOR_ACCENT,
+            "accent_light": COLOR_ACCENT_LIGHT,
+            "user_bg": COLOR_USER_BG,
+        },
+    }
 
 
 # ── Cache endpoints ───────────────────────────────────────────────────────
@@ -432,18 +265,6 @@ async def clear_cache_all():
         return {"ok": False, "error": str(e)}
 
 
-@app.get("/api/cache/warm/history")
-async def warm_history():
-    return {"history": await _warm_history_list()}
-
-
-@app.post("/api/cache/warm/stop")
-async def warm_stop():
-    global _warm_cancel
-    _warm_cancel = True
-    return {"ok": True}
-
-
 @app.get("/api/settings")
 async def get_settings():
     from server.settings import get_all
@@ -456,18 +277,6 @@ async def set_setting_endpoint(key: str, req: dict = {}):
     value = str(req.get("value", "false"))
     await set_setting(key, value)
     return {"ok": True, "key": key, "value": value}
-
-
-@app.post("/api/cache/warm")
-async def warm_cache_endpoint():
-    """Trigger cache warming as a background task."""
-    # Check if already running
-    history = await _warm_history_list()
-    if history and history[0].get("status") == "running":
-        return {"ok": False, "error": "Warming already in progress"}
-    # Run _run_warm in background (it's defined inside _cache_warm_loop — call it via the shared reference)
-    asyncio.create_task(_run_warm_ref("manual"))
-    return {"ok": True}
 
 
 # ── Static files ──────────────────────────────────────────────────────────────
@@ -497,7 +306,7 @@ if static_dir.exists():
 else:
     @app.get("/")
     async def root_fallback():
-        return {"message": "EE Crew Briefing API", "docs": "/api/docs"}
+        return {"message": f"{APP_TITLE} API", "docs": "/api/docs"}
 
 
 if __name__ == "__main__":

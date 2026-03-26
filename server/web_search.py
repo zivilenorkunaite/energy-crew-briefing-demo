@@ -1,5 +1,5 @@
 """Web search tool — searches for local council notices, community events, and road closures
-that may affect field crew operations in NSW, Australia.
+that may affect field crew operations.
 
 Uses Tavily MCP server for near-real-time web results."""
 
@@ -8,43 +8,18 @@ import json
 from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession
 
+from server.branding import (
+    DEPOT_COUNCILS as DEPOT_AREAS,
+    WEB_SEARCH_DOMAINS,
+    COMPANY_NAME, COMPANY_DOMAIN, COMPANY_OUTAGE_URL,
+    STATE_SHORT,
+)
+
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 TAVILY_MCP_URL = os.environ.get(
     "TAVILY_MCP_URL",
     f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}",
 )
-
-# Essential Energy depot areas → (display name, local council domain, LGA name)
-DEPOT_AREAS = {
-    "grafton":        ("Grafton NSW",        "clarence.nsw.gov.au",        "Clarence Valley"),
-    "coffs harbour":  ("Coffs Harbour NSW",  "coffsharbour.nsw.gov.au",    "Coffs Harbour"),
-    "port macquarie": ("Port Macquarie NSW", "pmhc.nsw.gov.au",            "Port Macquarie-Hastings"),
-    "taree":          ("Taree NSW",          "midcoast.nsw.gov.au",        "MidCoast"),
-    "tamworth":       ("Tamworth NSW",       "tamworth.nsw.gov.au",        "Tamworth Regional"),
-    "armidale":       ("Armidale NSW",       "armidaleregional.nsw.gov.au","Armidale Regional"),
-    "orange":         ("Orange NSW",         "orange.nsw.gov.au",          "Orange"),
-    "bathurst":       ("Bathurst NSW",       "bathurst.nsw.gov.au",        "Bathurst Regional"),
-    "dubbo":          ("Dubbo NSW",          "dubbo.nsw.gov.au",           "Dubbo Regional"),
-    "wagga wagga":    ("Wagga Wagga NSW",    "wagga.nsw.gov.au",           "Wagga Wagga"),
-    "queanbeyan":     ("Queanbeyan NSW",     "qprc.nsw.gov.au",            "Queanbeyan-Palerang"),
-    "bega":           ("Bega NSW",           "begavalley.nsw.gov.au",      "Bega Valley"),
-    "broken hill":    ("Broken Hill NSW",    "brokenhill.nsw.gov.au",      "Broken Hill"),
-    "lightning ridge": ("Lightning Ridge NSW","walgett.nsw.gov.au",         "Walgett"),
-    "glen innes":     ("Glen Innes NSW",     "gisc.nsw.gov.au",            "Glen Innes Severn"),
-    "lismore":        ("Lismore NSW",        "lismore.nsw.gov.au",         "Lismore"),
-    "casino":         ("Casino NSW",         "richmondvalley.nsw.gov.au",  "Richmond Valley"),
-    "inverell":       ("Inverell NSW",       "inverell.nsw.gov.au",        "Inverell"),
-    "mudgee":         ("Mudgee NSW",         "midwestern.nsw.gov.au",      "Mid-Western Regional"),
-    "moree":          ("Moree NSW",          "mpsc.nsw.gov.au",            "Moree Plains"),
-}
-
-NSW_DOMAINS = [
-    "livetraffic.com",
-    "transport.nsw.gov.au",
-    "essentialenergy.com.au",
-    "ses.nsw.gov.au",
-    "rfs.nsw.gov.au",
-]
 
 
 def _resolve_location(location: str) -> tuple[str, str | None, str | None]:
@@ -55,8 +30,8 @@ def _resolve_location(location: str) -> tuple[str, str | None, str | None]:
     for key, (display, domain, lga) in DEPOT_AREAS.items():
         if loc_lower in key or key in loc_lower:
             return (display, domain, lga)
-    if "nsw" not in loc_lower:
-        loc = f"{loc} NSW"
+    if STATE_SHORT.lower() not in loc_lower:
+        loc = f"{loc} {STATE_SHORT}"
     return (loc, None, None)
 
 
@@ -126,8 +101,8 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
 
     if search_type == "all":
         searches.append({
-            "query": f"{town_nsw} planned outage power disruption Essential Energy",
-            "domains": ["essentialenergy.com.au"],
+            "query": f"{town_nsw} planned outage power disruption {COMPANY_NAME}",
+            "domains": [COMPANY_DOMAIN],
         })
 
     all_results = []
@@ -154,7 +129,7 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
                 town.lower() in text_lower
                 or (lga and lga.lower() in text_lower)
                 or (council_domain and council_domain in url)
-                or any(d in url for d in NSW_DOMAINS)
+                or any(d in url for d in WEB_SEARCH_DOMAINS)
             )
             if not is_relevant:
                 continue
@@ -172,7 +147,7 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
         if council_domain:
             fallback.append(f"- {lga} Council: https://{council_domain}")
         fallback.append("- Live Traffic NSW: https://www.livetraffic.com")
-        fallback.append("- Essential Energy outages: https://www.essentialenergy.com.au/outages")
+        fallback.append(f"- {COMPANY_NAME} outages: {COMPANY_OUTAGE_URL}")
         fallback.append("- NSW SES: https://www.ses.nsw.gov.au")
         return "\n".join(fallback)
 

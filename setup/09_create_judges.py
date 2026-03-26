@@ -19,7 +19,7 @@ from mlflow.genai.judges import make_judge
 from mlflow.genai.scorers import Guidelines
 from typing import Literal
 
-EXPERIMENT = "/Shared/ee-crew-briefing-traces-uc"
+EXPERIMENT = "/Shared/energy-crew-briefing-traces-uc"
 mlflow.set_tracking_uri("databricks")
 mlflow.set_experiment(EXPERIMENT)
 

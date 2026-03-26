@@ -1,17 +1,14 @@
-"""Weather service — queries UC function `get_weather`, falls back to Open-Meteo API.
-
-The UC function `zivile.essential_energy_wacs.get_weather(location, forecast_date)` reads from
-the `bom_weather` Delta table (refreshed hourly). API fallback if data is missing or stale.
-"""
+"""Weather service — UC function with Open-Meteo API fallback."""
 
 import os
 import aiohttp
 from datetime import datetime, timedelta
 
+from server.branding import DEPOTS as _BRAND_DEPOTS, DEPOT_ALIASES, UC_FULL
 from server.config import get_oauth_token, get_workspace_host
 
-WAREHOUSE_ID = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "c2abb17a6c9e6bc0")
-UC_FUNCTION = "zivile.essential_energy_wacs.get_weather"
+WAREHOUSE_ID = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "")
+UC_FUNCTION = f"{UC_FULL}.get_weather"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
 WMO_CODES = {
@@ -23,30 +20,12 @@ WMO_CODES = {
     95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm with hail",
 }
 
-DEPOTS = {
-    "grafton": {"name": "Grafton", "lat": -29.69, "lon": 152.93},
-    "coffs harbour": {"name": "Coffs Harbour", "lat": -30.30, "lon": 153.11},
-    "coffs": {"name": "Coffs Harbour", "lat": -30.30, "lon": 153.11},
-    "tamworth": {"name": "Tamworth", "lat": -31.09, "lon": 150.93},
-    "orange": {"name": "Orange", "lat": -33.28, "lon": 149.10},
-    "dubbo": {"name": "Dubbo", "lat": -32.25, "lon": 148.60},
-    "wagga wagga": {"name": "Wagga Wagga", "lat": -35.12, "lon": 147.37},
-    "wagga": {"name": "Wagga Wagga", "lat": -35.12, "lon": 147.37},
-    "armidale": {"name": "Armidale", "lat": -30.51, "lon": 151.67},
-    "port macquarie": {"name": "Port Macquarie", "lat": -31.43, "lon": 152.91},
-    "port": {"name": "Port Macquarie", "lat": -31.43, "lon": 152.91},
-    "bathurst": {"name": "Bathurst", "lat": -33.42, "lon": 149.58},
-    "broken hill": {"name": "Broken Hill", "lat": -31.95, "lon": 141.47},
-    "lismore": {"name": "Lismore", "lat": -28.81, "lon": 153.28},
-    "casino": {"name": "Casino", "lat": -28.87, "lon": 153.05},
-    "glen innes": {"name": "Glen Innes", "lat": -29.73, "lon": 151.74},
-    "inverell": {"name": "Inverell", "lat": -29.78, "lon": 151.11},
-    "mudgee": {"name": "Mudgee", "lat": -32.59, "lon": 149.59},
-    "moree": {"name": "Moree", "lat": -29.46, "lon": 149.85},
-    "lightning ridge": {"name": "Lightning Ridge", "lat": -29.43, "lon": 147.98},
-    "queanbeyan": {"name": "Queanbeyan", "lat": -35.35, "lon": 149.23},
-    "bega": {"name": "Bega", "lat": -36.67, "lon": 149.84},
-}
+# Build depot lookup from branding (includes aliases)
+DEPOTS = {k: {"name": v["name"], "lat": v["lat"], "lon": v["lon"]} for k, v in _BRAND_DEPOTS.items()}
+for alias, canonical in DEPOT_ALIASES.items():
+    if canonical in _BRAND_DEPOTS:
+        d = _BRAND_DEPOTS[canonical]
+        DEPOTS[alias] = {"name": d["name"], "lat": d["lat"], "lon": d["lon"]}
 
 
 def _match_depot(location: str) -> dict:

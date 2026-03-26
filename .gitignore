@@ -2,4 +2,8 @@
 __pycache__/
 *.pyc
 swms_pdfs/
+asset_images/
 mlruns/
+mlflow.db
+.DS_Store
+.databricks/

@@ -1,66 +1,28 @@
 """Phase 1: Create Vector Search endpoint + Delta Sync index for SWMS documents.
 
 Run once from local machine with Databricks CLI configured (DEFAULT profile).
-Prerequisites: Table `zivile.essential_energy_wacs.swms_documents` must exist with columns:
+Prerequisites: Table `zivile.energy_crew_briefing.swms_documents` must exist with columns:
   work_type, section_title, content, document_name
 
 Steps:
   1. Add chunk_id identity column + enable Change Data Feed
-  2. Create Vector Search endpoint (ee-crew-briefing-vs)
+  2. Create Vector Search endpoint (energy-crew-briefing-vs)
   3. Create Delta Sync index on content column
   4. Grant App SP query access
 """
 
-import subprocess
 import json
 import time
 import sys
+import os
 
-PROFILE = "DEFAULT"
-CATALOG = "zivile"
-SCHEMA = "essential_energy_wacs"
-TABLE = f"{CATALOG}.{SCHEMA}.swms_documents"
-VS_ENDPOINT = "ee-crew-briefing-vs"
-VS_INDEX = f"{CATALOG}.{SCHEMA}.swms_documents_vs_index"
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import run_cli, run_sql, get_warehouse_id, get_app_sp_id, UC_FULL, UC_CATALOG, UC_SCHEMA, PROFILE
+
+TABLE = f"{UC_FULL}.swms_documents"
+VS_ENDPOINT = "energy-crew-briefing-vs"
+VS_INDEX = f"{UC_FULL}.swms_documents_vs_index"
 EMBEDDING_MODEL = "databricks-gte-large-en"
-APP_SP_ID = "84fba77d-2b5d-40ef-94e4-a0c81b5af427"
-WAREHOUSE_ID = "c2abb17a6c9e6bc0"
-
-
-def run_cli(args: list[str], parse_json=True):
-    """Run a databricks CLI command and return parsed output."""
-    cmd = ["databricks"] + args + ["--profile", PROFILE]
-    print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"  ERROR: {result.stderr.strip()}")
-        return None
-    if parse_json and result.stdout.strip():
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return result.stdout.strip()
-    return result.stdout.strip()
-
-
-def run_sql(statement: str):
-    """Execute SQL via the SQL Statements API."""
-    payload = {
-        "statement": statement,
-        "warehouse_id": WAREHOUSE_ID,
-        "wait_timeout": "30s",
-    }
-    result = run_cli([
-        "api", "post", "/api/2.0/sql/statements/",
-        "--json", json.dumps(payload),
-    ])
-    if result and isinstance(result, dict):
-        status = result.get("status", {}).get("state", "")
-        if status == "FAILED":
-            err = result.get("status", {}).get("error", {}).get("message", "Unknown")
-            print(f"  SQL FAILED: {err}")
-            return None
-    return result
 
 
 def step1_alter_table():
@@ -157,11 +119,12 @@ def step4_grant_sp():
     print("\n=== Step 4: Grant SP access ===")
 
     # Grant CAN_QUERY on the serving endpoint used for embeddings
-    print(f"  Granting CAN_QUERY on VS endpoint to SP {APP_SP_ID}...")
+    sp_id = get_app_sp_id()
+    print(f"  Granting CAN_QUERY on VS endpoint to SP {sp_id}...")
     payload = {
         "access_control_list": [
             {
-                "service_principal_name": APP_SP_ID,
+                "service_principal_name": sp_id,
                 "all_permissions": [{"permission_level": "CAN_MANAGE"}],
             }
         ]

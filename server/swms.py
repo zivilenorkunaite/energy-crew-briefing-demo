@@ -1,34 +1,16 @@
-"""SWMS Knowledge Assistant — calls the swms-knowledge-assistant-v2 endpoint.
-
-The v2 endpoint does direct VS retrieval + AI Gateway LLM synthesis.
-Uses standard chat completions format (messages/choices).
-"""
+"""SWMS Knowledge Assistant — queries the serving endpoint for safety documents."""
 
 import os
 import aiohttp
 
 from server.config import get_oauth_token, get_workspace_host
+from server.swms_content import DOCUMENT_NAMES
 
 SWMS_ENDPOINT = os.environ.get("SWMS_ENDPOINT", "swms-knowledge-assistant-v2")
 
-# All known document names — used by the agent as filter hints
-DOCUMENT_NAMES = [
-    "SWMS-001 Asset Replacement",
-    "SWMS-002 Capital Works",
-    "SWMS-003 Corrective Maintenance",
-    "SWMS-004 Emergency Response",
-    "SWMS-005 Inspection",
-    "SWMS-006 Planned Maintenance",
-    "SWMS-007 Vegetation Management",
-]
-
 
 async def query_swms(query: str, document_name: str | None = None) -> str:
-    """
-    Query the SWMS Knowledge Assistant v2 endpoint.
-
-    Uses standard chat completions format (messages in, choices out).
-    """
+    """Query the SWMS Knowledge Assistant endpoint."""
     host = get_workspace_host()
     token = get_oauth_token()
     url = f"{host}/serving-endpoints/{SWMS_ENDPOINT}/invocations"

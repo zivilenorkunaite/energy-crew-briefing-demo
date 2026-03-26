@@ -9,29 +9,17 @@ import os
 import aiohttp
 from typing import Any
 
+from server.branding import CREW_LIST_STRING, UC_FULL, TIMEZONE, TIMEZONE_LABEL
 from server.config import get_oauth_token, get_workspace_host
 from server.genie import query_genie
 from server.swms import query_swms, DOCUMENT_NAMES
 from server.web_search import search_local_notices
 from server.weather import query_weather
 
-# AI Gateway URLs
-AI_GATEWAY_URL = os.environ.get(
-    "AI_GATEWAY_URL",
-    "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions",
-)
-# Supervisor uses same AI_GATEWAY_URL with different model name
-# Model names — supervisor uses a fast gateway, writer uses the main gateway
-LLM_MODEL = os.environ.get("LLM_MODEL", "crew-briefing-llm")
-SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", "crew-briefing-small-and-fast-llm")
-
-# MLflow experiment for tracing — UC-linked for trace sync
-MLFLOW_EXPERIMENT = os.environ.get(
-    "MLFLOW_EXPERIMENT",
-    "/Shared/ee-crew-briefing-traces-uc",
-)
-
-# Agent version — bump when changing agent logic, prompts, or tool config
+AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "databricks-claude-sonnet-4-6")
+SUPERVISOR_MODEL = os.environ.get("SUPERVISOR_MODEL", "databricks-claude-sonnet-4-6")
+MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT", "/Shared/energy-crew-briefing-traces-uc")
 AGENT_VERSION = os.environ.get("AGENT_VERSION", "v4")
 
 _mlflow_ready = False
@@ -60,7 +48,7 @@ except Exception as e:
 
 # ── System Prompts (loaded from MLflow Prompt Registry) ────────────────────
 
-_UC_SCHEMA = "zivile.essential_energy_wacs"
+_UC_SCHEMA = UC_FULL
 _PROMPT_ALIAS = os.environ.get("PROMPT_ALIAS", "production")
 
 _supervisor_prompt_template = None
@@ -92,21 +80,14 @@ def _get_sydney_time() -> tuple[str, str]:
     from datetime import datetime
     try:
         from zoneinfo import ZoneInfo
-        now = datetime.now(ZoneInfo("Australia/Sydney"))
+        now = datetime.now(ZoneInfo(TIMEZONE))
     except Exception:
         from datetime import timezone, timedelta
         now = datetime.now(timezone(timedelta(hours=11)))
-    return now.strftime("%A, %d %B %Y"), now.strftime("%I:%M %p AEST")
+    return now.strftime("%A, %d %B %Y"), now.strftime(f"%I:%M %p {TIMEZONE_LABEL}")
 
 
-_CREW_LIST = (
-    "Grafton Lines A, Grafton Lines B, Coffs Harbour Lines, Coffs Harbour Cable, "
-    "Lismore Lines, Port Macquarie Lines, Tamworth Lines, Tamworth Substation, "
-    "Armidale Lines, Armidale Inspection, Orange Lines, Orange Cable, Dubbo Lines, "
-    "Dubbo Emergency, Bathurst Lines, Wagga Wagga Lines, Wagga Wagga Inspection, "
-    "Broken Hill Lines, Moree Lines, Mudgee Lines, Inverell Lines, Queanbeyan Lines, "
-    "Contractor Downer, Contractor Asplundh, Contractor Fulton Hogan"
-)
+_CREW_LIST = CREW_LIST_STRING
 
 
 def _build_supervisor_prompt() -> str:
@@ -129,7 +110,7 @@ TOOLS = [
         "function": {
             "name": "query_genie",
             "description": (
-                "Query Essential Energy's WACS database using natural language. "
+                "Query the operations database using natural language. "
                 "Use for: work orders by crew or date, task details, asset condition, "
                 "project status, crew assignments, scheduled/overdue work."
             ),
@@ -138,7 +119,7 @@ TOOLS = [
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "Natural language question about WACS data",
+                        "description": "Natural language question about operations data",
                     }
                 },
                 "required": ["question"],
@@ -279,6 +260,16 @@ def _check_output_guardrail(response: str) -> tuple[bool, str]:
 
 # ── LLM Calls ──────────────────────────────────────────────────────────────
 
+def _resolve_url(model_name: str, gateway_url: str | None = None) -> str:
+    """Resolve the LLM endpoint URL. Uses AI Gateway if set, otherwise Foundation Model API."""
+    if gateway_url:
+        return gateway_url
+    if AI_GATEWAY_URL:
+        return AI_GATEWAY_URL
+    host = get_workspace_host()
+    return f"{host}/serving-endpoints/{model_name}/invocations"
+
+
 async def _call_llm(
     system_prompt: str,
     messages: list[dict],
@@ -288,12 +279,12 @@ async def _call_llm(
     model: str | None = None,
     gateway_url: str | None = None,
 ) -> dict[str, Any]:
-    """Call an AI Gateway (OpenAI chat completions format). Used for both supervisor and writer."""
+    """Call LLM via AI Gateway or Foundation Model API."""
     token = get_oauth_token()
     if not token:
         return {"content": "[Auth error: no OAuth token available]", "tool_calls": [], "finish_reason": "stop"}
     use_model = model or LLM_MODEL
-    use_url = gateway_url or AI_GATEWAY_URL
+    use_url = _resolve_url(use_model, gateway_url)
 
     payload = {
         "model": use_model,
@@ -344,7 +335,7 @@ async def _call_llm_stream(
     if not token:
         return "[Auth error: no OAuth token available]"
     use_model = model or LLM_MODEL
-    use_url = gateway_url or AI_GATEWAY_URL
+    use_url = _resolve_url(use_model, gateway_url)
 
     payload = {
         "model": use_model,

@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # EE Crew Briefing — Agent Evaluation
+# MAGIC # Energy Crew Briefing — Agent Evaluation
 # MAGIC Runs MLflow evaluation with ground-truth Q&A pairs against the agent.
 # MAGIC Measures relevance, correctness, and safety using LLM judges.
 
@@ -14,7 +14,7 @@
 import mlflow
 import pandas as pd
 
-EXPERIMENT_PATH = "/Users/zivile.norkunaite@databricks.com/ee-crew-briefing-traces"
+EXPERIMENT_PATH = "/Users/zivile.norkunaite@databricks.com/energy-crew-briefing-traces"
 mlflow.set_experiment(EXPERIMENT_PATH)
 
 # COMMAND ----------
@@ -94,7 +94,7 @@ eval_data = pd.DataFrame([
 import requests
 import time
 
-APP_URL = "https://ee-crew-briefing-1313663707993479.aws.databricksapps.com"
+APP_URL = "https://energy-crew-briefing-1313663707993479.aws.databricksapps.com"
 
 def query_agent(question: str) -> dict:
     """Query the deployed agent and return response + sources."""
@@ -184,4 +184,4 @@ with mlflow.start_run(run_name="crew_briefing_eval"):
 
 # MAGIC %md
 # MAGIC View results in the MLflow Experiment UI:
-# MAGIC `/Users/zivile.norkunaite@databricks.com/ee-crew-briefing-traces`
+# MAGIC `/Users/zivile.norkunaite@databricks.com/energy-crew-briefing-traces`

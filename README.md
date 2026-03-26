@@ -1,8 +1,8 @@
-# EE Crew Briefing — Field Operations Briefing Assistant
+# Energy Crew Briefing — Field Operations Briefing Assistant
 
-AI-powered assistant for Essential Energy field supervisors and crew leaders. Prepares daily crew briefings with work orders, safety requirements, weather conditions, and local disruptions.
+AI-powered assistant for Regional Energy field supervisors and crew leaders. Prepares daily crew briefings with work orders, safety requirements, weather conditions, and local disruptions.
 
-**App URL:** https://ee-crew-briefing-1313663707993479.aws.databricksapps.com
+**App URL:** deployed via `./deploy.sh` (workspace-specific)
 
 ---
 
@@ -10,7 +10,7 @@ AI-powered assistant for Essential Energy field supervisors and crew leaders. Pr
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  DATABRICKS APP: ee-crew-briefing                                    │
+│  DATABRICKS APP: energy-crew-briefing                                    │
 │  FastAPI + vanilla JS chat UI (SSE streaming for writer tokens)      │
 │                                                                      │
 │  ┌────────────────────────────────────────────────────────────────┐  │
@@ -31,7 +31,6 @@ AI-powered assistant for Essential Energy field supervisors and crew leaders. Pr
 │  Cache → Lakebase tool_cache (SWMS 24h, Genie 24h, Web 2h, Wx 2h)  │
 │  Sessions → Lakebase conversations + messages                        │
 │  Settings → Lakebase app_settings                                    │
-│  Warm history → Lakebase warm_history                                │
 │  Tracing → MLflow Experiment (UC-linked, OpenTelemetry spans)        │
 │  Prompts → MLflow Prompt Registry (@production alias)                │
 └──────────────────────────────────────────────────────────────────────┘
@@ -41,7 +40,7 @@ AI-powered assistant for Essential Energy field supervisors and crew leaders. Pr
 
 | Tool | What | Backing Resource | App Code |
 |------|------|-----------------|----------|
-| **Genie Room** | NL queries over WACS (work orders, crews, assets) | Genie Room `01f111b05416164989106b097e2f7d21` + SQL Warehouse | `server/genie.py` |
+| **Genie Room** | NL queries over field operations data (work orders, crews, assets) | Genie Room `01f111b05416164989106b097e2f7d21` + SQL Warehouse | `server/genie.py` |
 | **SWMS v2** | Safety docs — loads full document from Delta, synthesises via AI Gateway | Serving endpoint `swms-knowledge-assistant-v2` (MLflow pyfunc) | `server/swms.py` |
 | **Weather** | Current + 14-day forecasts for 19 NSW depots | UC function `get_weather()` → `bom_weather` Delta table | `server/weather.py` |
 | **Web Search** | Road closures, events, disruptions near a location | Tavily MCP server (`mcp.tavily.com`) | `server/web_search.py` |
@@ -60,8 +59,8 @@ The SWMS v2 serving endpoint uses `crew-briefing-llm` internally for synthesis.
 ## Prompts
 
 Managed via **MLflow Prompt Registry** (Unity Catalog):
-- `zivile.essential_energy_wacs.crew_briefing_supervisor` — tool routing instructions
-- `zivile.essential_energy_wacs.crew_briefing_writer` — response composition instructions
+- `zivile.energy_crew_briefing.crew_briefing_supervisor` — tool routing instructions
+- `zivile.energy_crew_briefing.crew_briefing_writer` — response composition instructions
 
 Loaded at app startup via `@production` alias. To update: edit in Databricks UI → create new version → move `production` alias → redeploy app.
 
@@ -76,28 +75,25 @@ Tool results cached in Lakebase `tool_cache` table to speed up repeated queries.
 | Weather | 2h | location + date |
 | Web Search | 2h | location |
 
-**Cache warming:** Manual trigger from `/settings` page, or scheduled at 6am/6pm AEST (toggleable). Progress and history persisted to Lakebase `warm_history` table.
-
 ## Persistence (Lakebase Autoscaling)
 
 | Table | Purpose |
 |-------|---------|
 | `conversations` + `messages` | Chat session history |
 | `tool_cache` | Cached tool results |
-| `app_settings` | Toggle settings (stream response, warm enabled) |
-| `warm_history` | Cache warming run history |
+| `app_settings` | App settings (stream response) |
 
-**Project:** `ee-crew-briefing-as` | **Host:** `ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com`
+**Project:** `energy-crew-briefing-as` (host discovered at setup time)
 
 ## Observability
 
 | Component | Resource |
 |-----------|----------|
-| **Tracing** | MLflow Experiment `/Shared/ee-crew-briefing-traces-uc` (UC-linked, OpenTelemetry spans) |
+| **Tracing** | MLflow Experiment `/Shared/energy-crew-briefing-traces-uc` (UC-linked, OpenTelemetry spans) |
 | **Agent versioning** | MLflow LoggedModel `crew-briefing-agent-v4` |
 | **Prompt versioning** | MLflow Prompt Registry (supervisor + writer, aliased) |
 
-## App Resources
+## App Resources (DAB-managed)
 
 | Resource | Type | Permission |
 |----------|------|------------|
@@ -106,26 +102,73 @@ Tool results cached in Lakebase `tool_cache` table to speed up repeated queries.
 | `sql-warehouse` | SQL Warehouse | CAN_USE |
 | `tavily-api-key` | Secret | READ |
 | `mlflow-traces` | Experiment | CAN_MANAGE |
+| `postgres` | Lakebase Autoscaling | CAN_CONNECT_AND_CREATE |
+
+The `postgres` resource is added via REST API in `deploy.sh` (not yet supported in DAB bundle schema). All others are managed by `databricks.yml`.
 
 ## Deployment
 
-```bash
-# Deploy (bundle + app)
-./deploy.sh
+### Regular deploy (code changes)
 
-# First-time setup (Vector Search, Lakebase, BOM weather, MLflow experiment)
+```bash
+./deploy.sh
+```
+
+Runs: `databricks bundle deploy` → Lakebase postgres resource → `databricks apps deploy`.
+
+### First-time setup
+
+```bash
 ./deploy.sh --setup
 ```
 
-Uses Databricks Asset Bundles. Bundle manages: app config, env vars, serving endpoint permissions, SQL warehouse, experiment, scheduled jobs.
+Runs 10 automated phases in dependency order, then deploys:
 
-## Scheduled Jobs
+| Phase | Script | Creates | Depends on |
+|-------|--------|---------|------------|
+| 1 | (inline) | Secret scope | — |
+| 2 | `setup/02_lakebase.py` | Lakebase instance + DB + 4 tables | — |
+| 3 | `setup/11_seed_swms.py` | `swms_documents` Delta table (10 docs) | — |
+| 4 | `setup/01_vector_search.py` | Vector Search endpoint + index | Phase 3 |
+| 5 | `setup/03_bom_weather.py` | `bom_weather` table + `get_weather` function | — |
+| 6 | `setup/04_mlflow_experiment.py` | MLflow experiment for tracing | — |
+| 7 | `setup/05_realistic_data.py` | `work_orders` + `work_tasks` tables + demo data | — |
+| 8 | `setup/12_genie_room.py` | Genie Room for field operations | Phase 7 |
+| 9 | `setup/06_swms_agent.py` | SWMS serving endpoint (MLflow model) | Phase 3, 4 |
+| 10 | `setup/08_prompt_registry.py` | MLflow Prompt Registry (supervisor + writer) | — |
 
-| Job | Schedule | Compute |
+### Manual steps after first setup
+
+1. **AI Gateway endpoint** — Create via Databricks UI with model routes (`crew-briefing-llm`, `crew-briefing-small-and-fast-llm`).
+
+2. **Tavily API key** — Get from [tavily.com](https://tavily.com), then:
+   ```bash
+   databricks secrets put-secret energy-crew-briefing tavily-api-key
+   ```
+
+3. **Genie Room space_id** — If Phase 8 created a new room, update the `space_id` in `databricks.yml` (printed at the end of Phase 8).
+
+### Teardown (remove all resources)
+
+```bash
+./teardown.sh --confirm
+```
+
+Removes: app, DAB jobs, Lakebase instance, Vector Search endpoint, UC tables + function, Genie Room, secret scope.
+
+### Optional developer scripts
+
+| Script | Purpose |
+|--------|---------|
+| `setup/04_evaluation.py` | Run agent evaluation with ground-truth Q&A pairs |
+| `setup/09_create_judges.py` | Create LLM judges for trace analysis |
+
+## Scheduled Jobs (DAB-managed)
+
+| Job | Schedule | Purpose |
 |-----|----------|---------|
-| `ee-crew-briefing-bom-refresh` | Hourly | Serverless |
-
-Cache warming runs as an in-app background task (6am/6pm AEST), not a separate job.
+| `energy-crew-briefing-bom-refresh` | Hourly | Refresh weather data from Open-Meteo API |
+| `energy-crew-briefing-gateway-refresh` | Every 30 min | Refresh AI Gateway PAT for SWMS endpoint |
 
 ## Performance
 
@@ -139,9 +182,7 @@ Cache warming runs as an in-app background task (6am/6pm AEST), not a separate j
 
 Available at `/settings`:
 - **Stream writer response** — show text as it generates (default: off)
-- **Scheduled cache warming** — auto-warm at 6am/6pm AEST (default: on)
-- **Cache management** — per-tool clear buttons, manual warm trigger
-- **Warm history** — toggle to view run history with progress
+- **Cache management** — per-tool clear buttons
 
 All settings persisted to Lakebase.
 

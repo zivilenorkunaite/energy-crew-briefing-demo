@@ -1,4 +1,4 @@
-"""Configuration and authentication for EE Work Order Document Generator."""
+"""Configuration and authentication for Energy Crew Briefing."""
 
 import os
 from typing import Optional

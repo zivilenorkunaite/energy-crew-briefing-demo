@@ -17,7 +17,7 @@ flowchart TB
     %% ┌──────────────────────────────────────────────────┐
     %% │  ROW 2 — APP                                     │
     %% └──────────────────────────────────────────────────┘
-    subgraph APP["Databricks App  ·  ee-crew-briefing"]
+    subgraph APP["Databricks App  ·  energy-crew-briefing"]
         FASTAPI["FastAPI Backend  +  Vanilla JS Chat UI  (marked.js)"]
     end
 
@@ -61,9 +61,9 @@ flowchart TB
     %% ┌──────────────────────────────────────────────────┐
     %% │  ROW 6 — UNITY CATALOG                           │
     %% └──────────────────────────────────────────────────┘
-    subgraph UC["Unity Catalog  ·  zivile.essential_energy_wacs"]
+    subgraph UC["Unity Catalog  ·  zivile.energy_crew_briefing"]
         direction LR
-        WACS[("WACS Delta Tables\nassets · work_orders · work_tasks\ndepots · investments + 3 more")]
+        FIELDOPS[("Field Operations Delta Tables\nassets · work_orders · work_tasks\ndepots · investments + 3 more")]
         WXTBL[("bom_weather\nDelta Table")]
         SWMSTBL[("swms_documents\nVolume")]
     end
@@ -74,7 +74,7 @@ flowchart TB
     subgraph BOTTOM["Platform Services"]
         direction LR
         subgraph PERSIST["Persistence"]
-            LB[("Lakebase Autoscaling\nPostgreSQL  ·  ee-crew-briefing-as\nconversations  ·  messages")]
+            LB[("Lakebase Autoscaling\nPostgreSQL  ·  energy-crew-briefing-as\nconversations  ·  messages")]
         end
         subgraph BGJOBS["Scheduled Jobs"]
             direction TB
@@ -115,7 +115,7 @@ flowchart TB
     WEB_TOOL --> S1
 
     %% SQL Warehouse → UC tables
-    WH --> WACS
+    WH --> FIELDOPS
     WH --> WXTBL
 
     %% Persistence
@@ -141,7 +141,7 @@ flowchart TB
     classDef gray fill:#37474F,stroke:#78909C,color:#fff
 
     class FASTAPI,WH,GW,SUP,WRITER,GTE,VS,GENIE,SWMS_TOOL,WX_TOOL,WEB_TOOL blue
-    class WACS,WXTBL,SWMSTBL,LB green
+    class FIELDOPS,WXTBL,SWMSTBL,LB green
     class TAVILY,BOM,USER orange
     class MLFLOW,INFTBL purple
     class S1,S2,GWJOB,WXJOB gray

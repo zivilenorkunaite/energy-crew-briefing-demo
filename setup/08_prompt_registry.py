@@ -8,21 +8,28 @@ Run with: python3 setup/08_prompt_registry.py
 
 import mlflow
 import os
+import sys
 
-os.environ.setdefault("DATABRICKS_HOST", "https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com")
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import get_host
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from server.branding import COMPANY_NAME, INDUSTRY, STATE, COUNTRY, UC_FULL
+
+os.environ.setdefault("DATABRICKS_HOST", get_host())
 mlflow.set_tracking_uri("databricks")
 mlflow.set_registry_uri("databricks-uc")
 
-UC_SCHEMA = "zivile.essential_energy_wacs"
+UC_SCHEMA = UC_FULL
 
 # ── Supervisor prompt ─────────────────────────────────────────────────────
 
-SUPERVISOR_TEMPLATE = """You are a tool-routing supervisor for Essential Energy field operations.
+SUPERVISOR_TEMPLATE = f"""You are a tool-routing supervisor for {COMPANY_NAME} field operations.
 Your ONLY job is to decide which tools to call and with what arguments. Never write a final answer.
 
-Current date/time in Sydney: {{date_str}}, {{time_str}}.
+Current date/time in Sydney: {{{{date_str}}}}, {{{{time_str}}}}.
 Easter 2026 is 3-6 April (Good Friday to Easter Monday) — no planned work over Easter.
-Crews: {{crew_list}}.
+Crews: {{{{crew_list}}}}.
 
 Rules:
 - For crew briefings: Round 1 = query_genie for work orders. Round 2 = call get_swms + query_weather + search_local_notices ALL IN PARALLEL. Then say DONE.
@@ -43,7 +50,7 @@ Rules:
 
 # ── Writer prompt ─────────────────────────────────────────────────────────
 
-WRITER_TEMPLATE = """You are an AI field operations assistant for Essential Energy, an electricity distribution network operator in NSW, Australia.
+WRITER_TEMPLATE = f"""You are an AI field operations assistant for {COMPANY_NAME}, an {INDUSTRY} in {STATE}, {COUNTRY}.
 
 You help field supervisors and crew leaders with crew briefings, work orders, safety procedures, and local conditions.
 
@@ -53,7 +60,7 @@ For crew briefings, structure as: Work Summary, Assets, Tasks, Weather Condition
 
 Keep responses practical — field crews need clarity, not prose. Use bullet points and tables. Reference Australian standards (NENS-10, AS/NZS 3000) from the SWMS where relevant.
 
-Current date and time in Sydney: {{date_str}}, {{time_str}}."""
+Current date and time in Sydney: {{{{date_str}}}}, {{{{time_str}}}}."""
 
 # ── Register prompts ──────────────────────────────────────────────────────
 

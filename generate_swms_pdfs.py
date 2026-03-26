@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Generate SWMS PDFs and upload to Databricks UC Volume."""
+"""Generate SWMS PDFs from swms_content.py."""
 
 import os
 import sys
-
-# ── PDF generation ────────────────────────────────────────────────────────────
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -15,25 +13,19 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
-EE_GREEN = colors.HexColor("#1a4731")
-EE_ORANGE = colors.HexColor("#f4a011")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from server.branding import COLOR_PDF_PRIMARY, COLOR_PDF_ACCENT, COMPANY_NAME
+from server.swms_content import SWMS_CONTENT
+
+BRAND_PRIMARY = colors.HexColor(COLOR_PDF_PRIMARY)
+BRAND_ACCENT = colors.HexColor(COLOR_PDF_ACCENT)
 LIGHT_GREY = colors.HexColor("#f5f5f5")
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from server.swms import SWMS
 
-DOC_REFS = {
-    "Planned Maintenance":    "SWMS-001",
-    "Corrective Maintenance": "SWMS-002",
-    "Capital Works":          "SWMS-003",
-    "Emergency Response":     "SWMS-004",
-    "Inspection":             "SWMS-005",
-    "Asset Replacement":      "SWMS-006",
-    "Vegetation Management":  "SWMS-007",
-}
+def make_pdf(doc_name: str, sections: dict, out_path: str):
+    doc_ref = doc_name.split(" ", 1)[0]  # "SWMS-001"
+    work_type = doc_name.split(" ", 1)[1]  # "Asset Replacement"
 
-
-def make_pdf(work_type: str, content: str, out_path: str):
     doc = SimpleDocTemplate(
         out_path, pagesize=A4,
         leftMargin=2*cm, rightMargin=2*cm,
@@ -41,10 +33,8 @@ def make_pdf(work_type: str, content: str, out_path: str):
     )
 
     styles = getSampleStyleSheet()
-    h1 = ParagraphStyle("H1", parent=styles["Heading1"],
-                        textColor=EE_GREEN, fontSize=14, spaceAfter=4)
     h2 = ParagraphStyle("H2", parent=styles["Heading2"],
-                        textColor=EE_GREEN, fontSize=11, spaceAfter=3, spaceBefore=8)
+                        textColor=BRAND_PRIMARY, fontSize=11, spaceAfter=3, spaceBefore=8)
     body = ParagraphStyle("Body", parent=styles["Normal"],
                           fontSize=9, leading=13, spaceAfter=3)
     small = ParagraphStyle("Small", parent=styles["Normal"],
@@ -54,18 +44,18 @@ def make_pdf(work_type: str, content: str, out_path: str):
 
     # Header banner
     banner_data = [[
-        Paragraph("<b>ESSENTIAL ENERGY</b>", ParagraphStyle(
+        Paragraph(f"<b>{COMPANY_NAME.upper()}</b>", ParagraphStyle(
             "banner", fontSize=13, textColor=colors.white, leading=16)),
         Paragraph(
             f"<b>SAFE WORK METHOD STATEMENT</b><br/>"
-            f"{DOC_REFS[work_type]} | Version 3.x | Effective 1 Jan 2026",
+            f"{doc_ref} | Version 1.0 | Effective 1 Jan 2026",
             ParagraphStyle("banner2", fontSize=9, textColor=colors.white, leading=12,
                            alignment=TA_CENTER)
         ),
     ]]
     banner_table = Table(banner_data, colWidths=[8*cm, 9*cm])
     banner_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), EE_GREEN),
+        ("BACKGROUND", (0, 0), (-1, -1), BRAND_PRIMARY),
         ("TOPPADDING", (0, 0), (-1, -1), 8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
         ("LEFTPADDING", (0, 0), (0, -1), 10),
@@ -76,35 +66,28 @@ def make_pdf(work_type: str, content: str, out_path: str):
 
     # Work type subtitle
     story.append(Paragraph(f"<b>Work Type: {work_type}</b>",
-                            ParagraphStyle("wt", fontSize=11, textColor=EE_ORANGE, spaceAfter=4)))
-    story.append(HRFlowable(width="100%", thickness=2, color=EE_ORANGE, spaceAfter=8))
+                            ParagraphStyle("wt", fontSize=11, textColor=BRAND_ACCENT, spaceAfter=4)))
+    story.append(HRFlowable(width="100%", thickness=2, color=BRAND_ACCENT, spaceAfter=8))
 
-    # Parse and render content sections
-    current_section = None
-    for line in content.strip().splitlines():
-        line = line.strip()
-        if not line:
-            story.append(Spacer(1, 0.15*cm))
-            continue
-
-        # Section headings (ALL CAPS lines that look like headers)
-        if (line.isupper() or (line.endswith(")") and line.split("(")[0].strip().isupper())) \
-                and len(line) < 80 and not line.startswith("-"):
-            story.append(Paragraph(line, h2))
-            current_section = line
-        elif line.startswith("- ") or line.startswith("* "):
-            story.append(Paragraph(f"• {line[2:]}", body))
-        elif ": " in line and not line.startswith("•"):
-            # Key: value pair
-            parts = line.split(": ", 1)
-            story.append(Paragraph(f"<b>{parts[0]}:</b> {parts[1]}", body))
-        else:
-            story.append(Paragraph(line, body))
+    # Render each section
+    for section_title, content in sections.items():
+        story.append(Paragraph(section_title, h2))
+        for line in content.strip().splitlines():
+            line = line.strip()
+            if not line:
+                story.append(Spacer(1, 0.15*cm))
+            elif line.startswith("- "):
+                story.append(Paragraph(f"&bull; {line[2:]}", body))
+            elif ": " in line and not line.startswith("&"):
+                parts = line.split(": ", 1)
+                story.append(Paragraph(f"<b>{parts[0]}:</b> {parts[1]}", body))
+            else:
+                story.append(Paragraph(line, body))
 
     story.append(Spacer(1, 0.5*cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=EE_GREEN))
+    story.append(HRFlowable(width="100%", thickness=1, color=BRAND_PRIMARY))
 
-    # Footer sign-off table
+    # Sign-off table
     story.append(Spacer(1, 0.3*cm))
     story.append(Paragraph("<b>ACKNOWLEDGEMENT</b>", h2))
     signoff = [
@@ -115,7 +98,7 @@ def make_pdf(work_type: str, content: str, out_path: str):
     ]
     t = Table(signoff, colWidths=[5*cm, 4*cm, 4*cm, 3.5*cm])
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), EE_GREEN),
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND_PRIMARY),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
@@ -138,17 +121,20 @@ def main():
     out_dir = os.path.join(os.path.dirname(__file__), "swms_pdfs")
     os.makedirs(out_dir, exist_ok=True)
 
-    pdf_paths = {}
-    print("Generating SWMS PDFs...")
-    for work_type, content in SWMS.items():
-        ref = DOC_REFS[work_type]
-        filename = f"{ref}_{work_type.replace(' ', '_')}.pdf"
-        path = os.path.join(out_dir, filename)
-        make_pdf(work_type, content, path)
-        pdf_paths[work_type] = path
+    # Remove old PDFs
+    for f in os.listdir(out_dir):
+        if f.endswith(".pdf"):
+            os.remove(os.path.join(out_dir, f))
 
-    print(f"\nGenerated {len(pdf_paths)} PDFs in {out_dir}/")
-    return pdf_paths
+    print(f"Generating {len(SWMS_CONTENT)} SWMS PDFs...")
+    for doc_name, sections in SWMS_CONTENT.items():
+        doc_ref = doc_name.split(" ", 1)[0]
+        work_type = doc_name.split(" ", 1)[1]
+        filename = f"{doc_ref}_{work_type.replace(' ', '_')}.pdf"
+        path = os.path.join(out_dir, filename)
+        make_pdf(doc_name, sections, path)
+
+    print(f"\nGenerated {len(SWMS_CONTENT)} PDFs in {out_dir}/")
 
 
 if __name__ == "__main__":

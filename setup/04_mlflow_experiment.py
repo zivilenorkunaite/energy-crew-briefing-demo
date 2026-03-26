@@ -3,26 +3,14 @@
 Run once from local machine with Databricks CLI configured (DEFAULT profile).
 """
 
-import subprocess
 import json
+import sys
+import os
 
-PROFILE = "DEFAULT"
-EXPERIMENT_PATH = "/Users/zivile.norkunaite@databricks.com/ee-crew-briefing-traces"
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import run_cli, PROFILE
 
-
-def run_cli(args: list[str], parse_json=True):
-    cmd = ["databricks"] + args + ["--profile", PROFILE]
-    print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"  ERROR: {result.stderr.strip()}")
-        return None
-    if parse_json and result.stdout.strip():
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return result.stdout.strip()
-    return result.stdout.strip()
+EXPERIMENT_PATH = "/Shared/energy-crew-briefing-traces-uc"
 
 
 if __name__ == "__main__":

@@ -1,8 +1,5 @@
 bundle:
-  name: ee-crew-briefing
-
-workspace:
-  host: https://fe-vm-vdm-classic-dz1ef4.cloud.databricks.com
+  name: energy-crew-briefing
 
 sync:
   exclude:
@@ -12,6 +9,7 @@ sync:
     - __pycache__/
     - "*.pyc"
     - swms_pdfs/
+    - asset_images/
     - mlflow.db
     - mlruns/
     - generate_swms_pdfs.py
@@ -20,10 +18,10 @@ sync:
 
 resources:
   apps:
-    ee-crew-briefing:
-      name: ee-crew-briefing
+    energy-crew-briefing:
+      name: energy-crew-briefing
       description: "Field Operations Briefing Assistant — Genie + SWMS + Weather + Web Search"
-      source_code_path: ../ee-crew-briefing
+      source_code_path: ../energy-crew-briefing
 
       config:
         command:
@@ -36,53 +34,34 @@ resources:
           - --port
           - "8000"
         env:
-          - name: AI_GATEWAY_URL
-            value: "https://1313663707993479.ai-gateway.cloud.databricks.com/mlflow/v1/chat/completions"
           - name: LLM_MODEL
-            value: crew-briefing-llm
+            value: databricks-claude-sonnet-4-6
           - name: SUPERVISOR_MODEL
-            value: crew-briefing-small-and-fast-llm
+            value: databricks-claude-sonnet-4-6
           - name: SWMS_ENDPOINT
             value: swms-knowledge-assistant-v2
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
           - name: GENIE_SPACE_ID
             value_from: genie-field-ops
-          - name: PGHOST
-            value: ep-jolly-leaf-d20ipqcy.database.us-east-1.cloud.databricks.com
           - name: PGDATABASE
             value: databricks_postgres
           - name: PGPORT
             value: "5432"
           - name: PGSSLMODE
             value: require
-          - name: ENDPOINT_NAME
-            value: projects/ee-crew-briefing-as/branches/production/endpoints/primary
           - name: MLFLOW_TRACING_DESTINATION
-            value: zivile.essential_energy_wacs
+            value: main.energy_crew_briefing
           - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
             value_from: sql-warehouse
           - name: MLFLOW_EXPERIMENT
-            value: /Shared/ee-crew-briefing-traces-uc
+            value: /Shared/energy-crew-briefing-traces-uc
           - name: AGENT_VERSION
             value: v4
 
       resources:
-        - name: genie-field-ops
-          description: "Genie Room — Field Operations (WACS data)"
-          genie_space:
-            name: "Field Operations"
-            space_id: "01f111b05416164989106b097e2f7d21"
-            permission: CAN_RUN
-
-        - name: mlflow-traces
-          description: "MLflow experiment for agent tracing"
-          experiment:
-            experiment_id: "416109917792683"
-            permission: CAN_MANAGE
-
         - name: swms-v2
-          description: "SWMS Knowledge Assistant v2 — lightweight RAG"
+          description: "SWMS Knowledge Assistant serving endpoint"
           serving_endpoint:
             name: swms-knowledge-assistant-v2
             permission: CAN_QUERY
@@ -90,27 +69,15 @@ resources:
         - name: tavily-api-key
           description: "Tavily API key for web search"
           secret:
-            scope: ee-crew-briefing
+            scope: energy-crew-briefing
             key: tavily-api-key
             permission: READ
 
-        - name: sql-warehouse
-          description: "SQL Warehouse for weather + data queries"
-          sql_warehouse:
-            id: c2abb17a6c9e6bc0
-            permission: CAN_USE
-
-        # NOTE: UC function zivile.essential_energy_wacs.get_weather — EXECUTE granted to SP directly
-        # (function resources not supported in bundle format)
-
-        # NOTE: postgres and genie resources are not supported in bundle format.
-        # They are managed via REST API in deploy.sh:
-        #   - Lakebase Autoscaling (ee-crew-briefing-as) — CAN_CONNECT_AND_CREATE
-        #   - Genie Room (01f111b05416164989106b097e2f7d21) — CAN_RUN
+        # Lakebase postgres resource managed via REST API in deploy.sh (not supported in bundles)
 
   jobs:
     bom-weather-refresh:
-      name: ee-crew-briefing-bom-refresh
+      name: energy-crew-briefing-bom-refresh
       tags:
         demo: crew_briefing
       environments:
@@ -126,4 +93,19 @@ resources:
         quartz_cron_expression: "0 0 * * * ?"
         timezone_id: "Australia/Sydney"
 
-    # Cache warming runs in-app (app.py background task at 6am/6pm AEST)
+    gateway-token-refresh:
+      name: energy-crew-briefing-gateway-refresh
+      tags:
+        demo: crew_briefing
+      environments:
+        - environment_key: Default
+          spec:
+            client: "1"
+      tasks:
+        - task_key: refresh_token
+          notebook_task:
+            notebook_path: setup/07_refresh_gateway_token.py
+          environment_key: Default
+      schedule:
+        quartz_cron_expression: "0 */30 * * * ?"
+        timezone_id: "Australia/Sydney"

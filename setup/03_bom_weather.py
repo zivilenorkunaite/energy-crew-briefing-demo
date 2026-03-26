@@ -3,24 +3,22 @@
 Run once from local machine with Databricks CLI configured (DEFAULT profile).
 
 Steps:
-  1. Create Delta table `zivile.essential_energy_wacs.bom_weather`
-  2. Seed with current BOM observations for ~10 NSW stations
+  1. Create Delta table for BOM weather
+  2. Seed with current BOM observations for ~10 stations
   3. Grant App SP SELECT
 """
 
-import subprocess
 import json
 import sys
+import os
 import urllib.request
 
-PROFILE = "DEFAULT"
-CATALOG = "zivile"
-SCHEMA = "essential_energy_wacs"
-TABLE = f"{CATALOG}.{SCHEMA}.bom_weather"
-WAREHOUSE_ID = "c2abb17a6c9e6bc0"
-APP_SP_ID = "84fba77d-2b5d-40ef-94e4-a0c81b5af427"
+sys.path.insert(0, os.path.dirname(__file__))
+from helpers import run_cli, run_sql, get_app_sp_id, UC_FULL, UC_CATALOG, UC_SCHEMA
 
-# NSW stations relevant to Essential Energy service area
+TABLE = f"{UC_FULL}.bom_weather"
+
+# BOM weather stations for depot service area
 STATIONS = {
     "Grafton": {"wmo_id": 94791, "product": "IDN60901"},
     "Coffs Harbour": {"wmo_id": 59040, "product": "IDN60901"},
@@ -33,42 +31,6 @@ STATIONS = {
     "Bathurst": {"wmo_id": 94729, "product": "IDN60901"},
     "Broken Hill": {"wmo_id": 94689, "product": "IDN60901"},
 }
-
-
-def run_cli(args: list[str], parse_json=True):
-    """Run a databricks CLI command and return parsed output."""
-    cmd = ["databricks"] + args + ["--profile", PROFILE]
-    print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"  ERROR: {result.stderr.strip()}")
-        return None
-    if parse_json and result.stdout.strip():
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return result.stdout.strip()
-    return result.stdout.strip()
-
-
-def run_sql(statement: str):
-    """Execute SQL via the SQL Statements API."""
-    payload = {
-        "statement": statement,
-        "warehouse_id": WAREHOUSE_ID,
-        "wait_timeout": "30s",
-    }
-    result = run_cli([
-        "api", "post", "/api/2.0/sql/statements/",
-        "--json", json.dumps(payload),
-    ])
-    if result and isinstance(result, dict):
-        status = result.get("status", {}).get("state", "")
-        if status == "FAILED":
-            err = result.get("status", {}).get("error", {}).get("message", "Unknown")
-            print(f"  SQL FAILED: {err}")
-            return None
-    return result
 
 
 def step1_create_table():
@@ -90,7 +52,7 @@ def step1_create_table():
         weather_description STRING,
         updated_at TIMESTAMP
     )
-    COMMENT 'BOM weather observations for Essential Energy service area stations'
+    COMMENT 'BOM weather observations for depot service area stations'
     """
     run_sql(sql)
     print("  Table created.")
@@ -212,10 +174,45 @@ def step2_seed_data():
     print(f"  Seeded {len(all_rows)} total observations.")
 
 
-def step3_grant_sp():
-    """Grant App SP SELECT on the weather table."""
-    print("\n=== Step 3: Grant SP SELECT ===")
-    run_sql(f"GRANT SELECT ON TABLE {TABLE} TO `{APP_SP_ID}`")
+def step3_create_uc_function():
+    """Create the get_weather UC function for querying from the app."""
+    print("\n=== Step 3: Create get_weather UC function ===")
+    run_sql(f"""
+    CREATE OR REPLACE FUNCTION {UC_FULL}.get_weather(
+        station STRING,
+        forecast_date STRING DEFAULT NULL
+    )
+    RETURNS TABLE (
+        station_name STRING,
+        observation_time TIMESTAMP,
+        temperature DOUBLE,
+        apparent_temperature DOUBLE,
+        humidity INT,
+        wind_speed_kmh DOUBLE,
+        wind_gust_kmh DOUBLE,
+        wind_direction STRING,
+        rain_since_9am DOUBLE,
+        weather_description STRING
+    )
+    RETURN
+        SELECT station_name, observation_time, temperature, apparent_temperature,
+               humidity, wind_speed_kmh, wind_gust_kmh, wind_direction,
+               rain_since_9am, weather_description
+        FROM {TABLE}
+        WHERE station_name = station
+          AND (forecast_date IS NULL
+               OR CAST(observation_time AS DATE) = CAST(forecast_date AS DATE))
+        ORDER BY observation_time DESC
+    """)
+    print("  Function created.")
+
+
+def step4_grant_sp():
+    """Grant App SP SELECT on the weather table and EXECUTE on function."""
+    print("\n=== Step 4: Grant SP access ===")
+    sp_id = get_app_sp_id()
+    run_sql(f"GRANT SELECT ON TABLE {TABLE} TO `{sp_id}`")
+    run_sql(f"GRANT EXECUTE ON FUNCTION {UC_FULL}.get_weather TO `{sp_id}`")
     print("  Done.")
 
 
@@ -225,7 +222,8 @@ if __name__ == "__main__":
     print("=" * 60)
     step1_create_table()
     step2_seed_data()
-    step3_grant_sp()
+    step3_create_uc_function()
+    step4_grant_sp()
 
     # Liquid clustering for query performance
     print("\n=== Step 4: Optimize table ===")
