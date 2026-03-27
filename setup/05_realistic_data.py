@@ -405,6 +405,8 @@ def create_tables():
             description STRING
         )
     """)
+    # Schema migration: add location column if upgrading from older version
+    run_sql(f"ALTER TABLE {UC_FULL}.work_orders ADD COLUMN IF NOT EXISTS location STRING")
     print("  work_orders table ready")
 
     run_sql(f"""
