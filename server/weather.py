@@ -4,7 +4,7 @@ import os
 import aiohttp
 from datetime import datetime, timedelta
 
-from server.branding import DEPOTS as _BRAND_DEPOTS, DEPOT_ALIASES, UC_FULL
+from server.customise import DEPOTS as _BRAND_DEPOTS, DEPOT_ALIASES, UC_FULL
 from server.config import get_oauth_token, get_workspace_host
 
 WAREHOUSE_ID = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "")
@@ -20,7 +20,7 @@ WMO_CODES = {
     95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm with hail",
 }
 
-# Build depot lookup from branding (includes aliases)
+# Build depot lookup from customise (includes aliases)
 DEPOTS = {k: {"name": v["name"], "lat": v["lat"], "lon": v["lon"]} for k, v in _BRAND_DEPOTS.items()}
 for alias, canonical in DEPOT_ALIASES.items():
     if canonical in _BRAND_DEPOTS:

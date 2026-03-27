@@ -1,8 +1,30 @@
-# Databricks notebook source
+"""Generate setup/03_bom_refresh.py notebook from customise.py config.
+
+Run before bundle deploy to ensure the notebook has current depot locations.
+Called automatically by deploy.sh.
+"""
+
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from server.customise import WEATHER_STATIONS, UC_FULL, TIMEZONE
+
+TABLE = f"{UC_FULL}.bom_weather"
+OUTPUT = os.path.join(os.path.dirname(__file__), "03_bom_refresh.py")
+
+# Format stations as Python list literal
+stations_lines = []
+for s in WEATHER_STATIONS:
+    stations_lines.append(f'    {{"name": "{s["name"]}":{" " * (20 - len(s["name"]))}"lat": {s["lat"]}, "lon": {s["lon"]}}},')
+stations_block = "[\n" + "\n".join(stations_lines) + "\n]"
+
+NOTEBOOK = f'''# Databricks notebook source
 # MAGIC %md
 # MAGIC # Weather Refresh (Open-Meteo)
 # MAGIC Fetches current observations + 7-day hourly forecasts from Open-Meteo API
-# MAGIC for depot areas and upserts into `main.energy_crew_briefing.bom_weather`.
+# MAGIC for depot areas and upserts into `{TABLE}`.
 # MAGIC
 # MAGIC Scheduled hourly via DAB job (serverless compute).
 # MAGIC
@@ -13,38 +35,18 @@
 import json
 import urllib.request
 
-TABLE = "main.energy_crew_briefing.bom_weather"
+TABLE = "{TABLE}"
 
-STATIONS = [
-    {"name": "Townsville":          "lat": -19.25, "lon": 146.8},
-    {"name": "Cairns":              "lat": -16.92, "lon": 145.77},
-    {"name": "Mackay":              "lat": -21.14, "lon": 149.19},
-    {"name": "Rockhampton":         "lat": -23.38, "lon": 150.51},
-    {"name": "Bundaberg":           "lat": -24.87, "lon": 152.35},
-    {"name": "Gladstone":           "lat": -23.85, "lon": 151.27},
-    {"name": "Maryborough":         "lat": -25.53, "lon": 152.7},
-    {"name": "Toowoomba":           "lat": -27.56, "lon": 151.95},
-    {"name": "Roma":                "lat": -26.57, "lon": 148.79},
-    {"name": "Emerald":             "lat": -23.53, "lon": 148.16},
-    {"name": "Mount Isa":           "lat": -20.73, "lon": 139.49},
-    {"name": "Longreach":           "lat": -23.44, "lon": 144.25},
-    {"name": "Gympie":              "lat": -26.19, "lon": 152.67},
-    {"name": "Innisfail":           "lat": -17.52, "lon": 146.03},
-    {"name": "Bowen":               "lat": -20.01, "lon": 148.24},
-    {"name": "Charters Towers":     "lat": -20.08, "lon": 146.26},
-    {"name": "Atherton":            "lat": -17.27, "lon": 145.48},
-    {"name": "Ayr":                 "lat": -19.57, "lon": 147.4},
-    {"name": "Biloela":             "lat": -24.4, "lon": 150.51},
-]
+STATIONS = {stations_block}
 
-WMO_CODES = {
+WMO_CODES = {{
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
     45: "Fog", 48: "Depositing rime fog",
     51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
     61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
     80: "Light rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
     95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm with hail",
-}
+}}
 
 WIND_DIRS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
              "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
@@ -56,20 +58,20 @@ lons = ",".join(str(s["lon"]) for s in STATIONS)
 
 url = (
     f"https://api.open-meteo.com/v1/forecast?"
-    f"latitude={lats}&longitude={lons}"
+    f"latitude={{lats}}&longitude={{lons}}"
     f"&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
     f"wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,precipitation,cloud_cover"
     f"&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,"
     f"wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,precipitation,cloud_cover"
-    f"&forecast_days=14&timezone=Australia/Brisbane&wind_speed_unit=kmh"
+    f"&forecast_days=14&timezone={TIMEZONE}&wind_speed_unit=kmh"
 )
 
-req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+req = urllib.request.Request(url, headers={{"User-Agent": "Mozilla/5.0"}})
 with urllib.request.urlopen(req, timeout=30) as resp:
     data = json.loads(resp.read())
 
 results_list = data if isinstance(data, list) else [data]
-print(f"Got {len(results_list)} station results")
+print(f"Got {{len(results_list)}} station results")
 
 # COMMAND ----------
 
@@ -85,9 +87,9 @@ for i, result in enumerate(results_list):
         break
     station = STATIONS[i]
 
-    c = result.get("current", {})
+    c = result.get("current", {{}})
     code = c.get("weather_code", 0)
-    all_rows.append({
+    all_rows.append({{
         "station_name": station["name"],
         "latitude": station["lat"],
         "longitude": station["lon"],
@@ -101,15 +103,15 @@ for i, result in enumerate(results_list):
         "wind_direction": wind_compass(c.get("wind_direction_10m")),
         "precipitation": c.get("precipitation"),
         "weather_code": code,
-        "weather_description": WMO_CODES.get(code, f"Code {code}"),
+        "weather_description": WMO_CODES.get(code, f"Code {{code}}"),
         "cloud_cover": c.get("cloud_cover"),
-    })
+    }})
 
-    h = result.get("hourly", {})
+    h = result.get("hourly", {{}})
     times = h.get("time", [])
     for j, t in enumerate(times):
         hcode = (h.get("weather_code") or [None])[j] if j < len(h.get("weather_code", [])) else None
-        all_rows.append({
+        all_rows.append({{
             "station_name": station["name"],
             "latitude": station["lat"],
             "longitude": station["lon"],
@@ -123,11 +125,11 @@ for i, result in enumerate(results_list):
             "wind_direction": wind_compass((h.get("wind_direction_10m") or [None])[j] if j < len(h.get("wind_direction_10m", [])) else None),
             "precipitation": (h.get("precipitation") or [None])[j] if j < len(h.get("precipitation", [])) else None,
             "weather_code": hcode,
-            "weather_description": WMO_CODES.get(hcode, f"Code {hcode}") if hcode is not None else None,
+            "weather_description": WMO_CODES.get(hcode, f"Code {{hcode}}") if hcode is not None else None,
             "cloud_cover": (h.get("cloud_cover") or [None])[j] if j < len(h.get("cloud_cover", [])) else None,
-        })
+        }})
 
-print(f"Parsed {len(all_rows)} rows ({len(STATIONS)} current + {len(all_rows) - len(STATIONS)} hourly forecasts)")
+print(f"Parsed {{len(all_rows)}} rows ({{len(STATIONS)}} current + {{len(all_rows) - len(STATIONS)}} hourly forecasts)")
 
 # COMMAND ----------
 
@@ -154,21 +156,21 @@ if all_rows:
     ])
 
     df = spark.createDataFrame(all_rows, schema=schema)
-    df = df.withColumn("observation_time", to_timestamp("observation_time", "yyyy-MM-dd\'T\'HH:mm"))
+    df = df.withColumn("observation_time", to_timestamp("observation_time", "yyyy-MM-dd\\'T\\'HH:mm"))
     df = df.withColumn("refreshed_at", current_timestamp())
 
     df_current = df.filter("forecast_type = 'current'")
     df_forecast = df.filter("forecast_type = 'hourly_forecast'")
 
     df_current.createOrReplaceTempView("current_updates")
-    spark.sql(f"DELETE FROM {TABLE} WHERE forecast_type = 'current'")
-    spark.sql(f"INSERT INTO {TABLE} SELECT * FROM current_updates")
+    spark.sql(f"DELETE FROM {{TABLE}} WHERE forecast_type = 'current'")
+    spark.sql(f"INSERT INTO {{TABLE}} SELECT * FROM current_updates")
     current_count = df_current.count()
-    print(f"Current: replaced {current_count} station observations")
+    print(f"Current: replaced {{current_count}} station observations")
 
     df_forecast.createOrReplaceTempView("forecast_updates")
     spark.sql(f"""
-        MERGE INTO {TABLE} AS target
+        MERGE INTO {{TABLE}} AS target
         USING forecast_updates AS source
         ON target.station_name = source.station_name
            AND target.observation_time = source.observation_time
@@ -190,8 +192,14 @@ if all_rows:
         WHEN NOT MATCHED THEN INSERT *
     """)
     forecast_count = df_forecast.count()
-    print(f"Forecasts: upserted {forecast_count} hourly rows")
+    print(f"Forecasts: upserted {{forecast_count}} hourly rows")
 
-    print(f"Total: {current_count + forecast_count} rows into {TABLE}")
+    print(f"Total: {{current_count + forecast_count}} rows into {{TABLE}}")
 else:
     print("No data fetched. Skipping MERGE.")
+'''
+
+if __name__ == "__main__":
+    with open(OUTPUT, "w") as f:
+        f.write(NOTEBOOK)
+    print(f"Generated {OUTPUT} with {len(WEATHER_STATIONS)} stations from customise.py")

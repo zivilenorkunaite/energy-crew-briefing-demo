@@ -34,7 +34,7 @@ except Exception as e:
     async def run_agent(*a, **kw):
         yield {"type": "error", "content": f"Agent not available: {_startup_errors}"}
 
-from server.branding import (
+from server.customise import (
     APP_TITLE, COMPANY_NAME, PAGE_TITLE, APP_DISPLAY, APP_SUBTITLE,
     COLOR_PRIMARY, COLOR_PRIMARY_LIGHT, COLOR_ACCENT, COLOR_ACCENT_LIGHT, COLOR_USER_BG,
 )

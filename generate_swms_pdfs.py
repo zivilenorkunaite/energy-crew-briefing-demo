@@ -14,7 +14,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from server.branding import COLOR_PDF_PRIMARY, COLOR_PDF_ACCENT, COMPANY_NAME
+from server.customise import COLOR_PDF_PRIMARY, COLOR_PDF_ACCENT, COMPANY_NAME
 from server.swms_content import SWMS_CONTENT
 
 BRAND_PRIMARY = colors.HexColor(COLOR_PDF_PRIMARY)

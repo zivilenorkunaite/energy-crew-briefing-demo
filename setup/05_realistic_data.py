@@ -484,13 +484,13 @@ def generate_assets():
             street = random.choice(STREET_NAMES)
             street_num = random.randint(1, 350)
 
-            # Get lat/lon from branding depots (approximate — add random offset)
+            # Get lat/lon from customise depots (approximate — add random offset)
             depot_lower = depot.lower()
             base_lat, base_lon = -30.0, 150.0  # fallback
             for k, v in DEPOT_LOCATIONS.items():
                 if k == depot:
-                    # Use the depot location from branding
-                    from server.branding import DEPOTS as BRAND_DEPOTS
+                    # Use the depot location from customise
+                    from server.customise import DEPOTS as BRAND_DEPOTS
                     dk = depot.lower()
                     if dk in BRAND_DEPOTS:
                         base_lat = BRAND_DEPOTS[dk]["lat"]

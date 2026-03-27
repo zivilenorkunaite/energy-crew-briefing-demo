@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from helpers import run_cli, run_sql, get_app_sp_id, UC_FULL, UC_CATALOG, UC_SCHEMA
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from server.branding import BOM_STATIONS as STATIONS
+from server.customise import BOM_STATIONS as STATIONS
 
 TABLE = f"{UC_FULL}.bom_weather"
 

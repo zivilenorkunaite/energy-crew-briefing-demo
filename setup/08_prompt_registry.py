@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from helpers import get_host
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from server.branding import COMPANY_NAME, INDUSTRY, STATE, COUNTRY, UC_FULL
+from server.customise import COMPANY_NAME, INDUSTRY, STATE, COUNTRY, UC_FULL
 
 os.environ.setdefault("DATABRICKS_HOST", get_host())
 mlflow.set_tracking_uri("databricks")

@@ -9,7 +9,7 @@ import os
 import aiohttp
 from typing import Any
 
-from server.branding import CREW_LIST_STRING, UC_FULL, TIMEZONE, TIMEZONE_LABEL
+from server.customise import CREW_LIST_STRING, UC_FULL, TIMEZONE, TIMEZONE_LABEL
 from server.config import get_oauth_token, get_workspace_host
 from server.genie import query_genie
 from server.swms import query_swms, DOCUMENT_NAMES

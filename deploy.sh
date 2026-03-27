@@ -99,6 +99,10 @@ if $RUN_SETUP; then
     echo ""
 fi
 
+# ── Generate config-dependent files ───────────────────────────────────
+echo "Generating BOM refresh notebook from customise.py..."
+python3 "$SCRIPT_DIR/setup/generate_bom_notebook.py"
+
 # ── Bundle deploy ─────────────────────────────────────────────────────
 echo "Running bundle deploy..."
 cd "$SCRIPT_DIR"

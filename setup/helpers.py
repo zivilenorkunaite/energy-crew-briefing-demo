@@ -6,7 +6,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from server.branding import UC_FULL, UC_CATALOG, UC_SCHEMA
+from server.customise import UC_FULL, UC_CATALOG, UC_SCHEMA
 
 PROFILE = os.environ.get("DATABRICKS_PROFILE", "DEFAULT")
 

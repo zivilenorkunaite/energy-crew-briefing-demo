@@ -8,7 +8,7 @@ import json
 from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession
 
-from server.branding import (
+from server.customise import (
     DEPOT_COUNCILS as DEPOT_AREAS,
     WEB_SEARCH_DOMAINS,
     COMPANY_NAME, COMPANY_DOMAIN, COMPANY_OUTAGE_URL,
