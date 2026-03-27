@@ -122,6 +122,73 @@ def grant_uc_permissions(app):
         print(f"  {status}: {sql.split('TO')[0].strip()}")
 
 
+def create_lakebase_role(app):
+    """Create PostgreSQL role for the App SP in Lakebase.
+
+    The database app resource should do this automatically, but when added via API
+    (not UI), the role isn't always created. This ensures it exists.
+    """
+    sp_client_id = app.get("service_principal_client_id", "")
+    if not sp_client_id:
+        print("  No SP client ID found — skipping Lakebase role")
+        return
+
+    # Generate a credential to connect as ourselves
+    cred = run_cli([
+        "database", "generate-database-credential",
+        "--json", json.dumps({"instance_names": [LAKEBASE_INSTANCE]}),
+    ])
+    if not cred or not cred.get("token"):
+        print("  Could not generate database credential — skipping role creation")
+        return
+
+    from helpers import get_user
+
+    try:
+        import psycopg2
+    except ImportError:
+        print("  psycopg2 not installed — skipping Lakebase role creation")
+        return
+
+    # Get Lakebase host
+    instance = run_cli(["database", "get-database-instance", LAKEBASE_INSTANCE])
+    if not instance:
+        print(f"  Lakebase instance '{LAKEBASE_INSTANCE}' not found")
+        return
+    pg_host = instance.get("read_write_dns", "")
+    if not pg_host:
+        print("  No read_write_dns found")
+        return
+
+    try:
+        conn = psycopg2.connect(
+            host=pg_host, port=5432, database=LAKEBASE_DATABASE,
+            user=get_user(), password=cred["token"], sslmode="require",
+        )
+        conn.autocommit = True
+        cur = conn.cursor()
+
+        # Check if role exists
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (sp_client_id,))
+        if cur.fetchone():
+            print(f"  Role '{sp_client_id[:20]}...' already exists")
+        else:
+            cur.execute(f'CREATE ROLE "{sp_client_id}" LOGIN')
+            print(f"  Created PostgreSQL role for SP")
+
+        # Grant privileges
+        cur.execute(f'GRANT CONNECT ON DATABASE {LAKEBASE_DATABASE} TO "{sp_client_id}"')
+        cur.execute(f'GRANT USAGE, CREATE ON SCHEMA public TO "{sp_client_id}"')
+        cur.execute(f'GRANT ALL ON ALL TABLES IN SCHEMA public TO "{sp_client_id}"')
+        cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{sp_client_id}"')
+        print("  PostgreSQL grants applied")
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"  Lakebase role creation error: {e}")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("App Resources + UC Grants")
@@ -140,6 +207,9 @@ if __name__ == "__main__":
 
     print("\n--- Granting UC permissions ---")
     grant_uc_permissions(app)
+
+    print("\n--- Creating Lakebase PostgreSQL role ---")
+    create_lakebase_role(app)
 
     print(f"\n{'=' * 60}")
     print("Done")

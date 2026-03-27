@@ -19,17 +19,19 @@ def _generate_token() -> str:
     w = WorkspaceClient()
     host = w.config.host
 
-    # Method 1: SDK postgres API (AWS Lakebase Autoscaling)
+    # Method 1: Use workspace OAuth token directly as PostgreSQL password
+    # This works when the SP has a PostgreSQL role matching its client ID
     try:
-        cred = w.postgres.generate_database_credential(endpoint=_ENDPOINT_NAME)
-        token = getattr(cred, "token", None) or getattr(cred, "password", "")
-        if token:
-            print(f"[DB] Lakebase token via postgres SDK ({len(token)} chars)")
+        auth = w.config.authenticate()
+        bearer = auth.get("Authorization", "")
+        if bearer:
+            token = bearer.replace("Bearer ", "")
+            print(f"[DB] Using workspace OAuth token ({len(token)} chars)")
             return token
     except Exception as e:
-        print(f"[DB] postgres SDK failed: {e}")
+        print(f"[DB] OAuth token failed: {e}")
 
-    # Method 2: SDK database API (Azure Lakebase)
+    # Method 2: SDK database credential API
     try:
         cred = w.database.generate_database_credential(instance_names=[_ENDPOINT_NAME])
         token = getattr(cred, "token", None) or getattr(cred, "password", "")
@@ -39,24 +41,15 @@ def _generate_token() -> str:
     except Exception as e:
         print(f"[DB] database SDK failed: {e}")
 
-    # Method 3: REST API fallback
+    # Method 3: SDK postgres API (AWS Lakebase Autoscaling)
     try:
-        import urllib.request
-        auth = w.config.authenticate()
-        bearer = auth.get("Authorization", "")
-        req = urllib.request.Request(
-            f"{host}/api/2.0/database/generate-database-credential",
-            data=json.dumps({"instance_names": [_ENDPOINT_NAME]}).encode(),
-            headers={"Authorization": bearer, "Content-Type": "application/json"},
-            method="POST",
-        )
-        resp = json.loads(urllib.request.urlopen(req, timeout=15).read())
-        token = resp.get("token", "")
+        cred = w.postgres.generate_database_credential(endpoint=_ENDPOINT_NAME)
+        token = getattr(cred, "token", None) or getattr(cred, "password", "")
         if token:
-            print(f"[DB] Lakebase token via REST API ({len(token)} chars)")
+            print(f"[DB] Lakebase token via postgres SDK ({len(token)} chars)")
             return token
     except Exception as e:
-        print(f"[DB] REST API failed: {e}")
+        print(f"[DB] postgres SDK failed: {e}")
 
     raise RuntimeError("Could not generate Lakebase credential")
 
@@ -82,6 +75,7 @@ class DatabasePool:
 
             pg_db = os.environ.get("PGDATABASE", "databricks_postgres")
             pg_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
+            print(f"[DB] Connecting: host={pg_host[:30]}... db={pg_db} user={pg_user[:20]}... port={pg_port}")
             # Use platform-injected PGPASSWORD, or generate via API
             token = os.environ.get("PGPASSWORD", "")
             if not token:
