@@ -2,20 +2,68 @@
 
 import io
 import re
+import aiohttp
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
-from server.customise import COMPANY_NAME, COLOR_PDF_PRIMARY, COLOR_PDF_ACCENT
+from server.customise import COMPANY_NAME, COLOR_PDF_PRIMARY, COLOR_PDF_ACCENT, UC_FULL
+from server.config import get_oauth_token, get_workspace_host
 
 BRAND_PRIMARY = colors.HexColor(COLOR_PDF_PRIMARY)
 BRAND_ACCENT = colors.HexColor(COLOR_PDF_ACCENT)
 LIGHT_GREY = colors.HexColor("#f5f5f5")
+
+# Asset types we can show images for (maps keywords in text → image filename)
+ASSET_IMAGE_KEYWORDS = {
+    "timber pole": "timber_pole.png",
+    "concrete pole": "concrete_pole.png",
+    "steel pole": "steel_pole.png",
+    "transformer": "pole-mount_transformer.png",
+    "pad-mount transformer": "pad-mount_transformer.png",
+    "recloser": "recloser.png",
+    "switchgear": "circuit_breaker.png",
+    "cross-arm": "hardwood_cross-arm.png",
+    "conductor": "overhead_conductor.png",
+    "underground cable": "underground_cable.png",
+    "insulator": "insulator.png",
+    "meter": "smart_meter.png",
+    "substation": "zone_substation_transformer.png",
+    "vegetation": "timber_pole.png",
+}
+
+
+def _fetch_asset_image(filename: str) -> io.BytesIO | None:
+    """Fetch an asset image from UC Volume. Returns BytesIO or None."""
+    import urllib.request
+    try:
+        host = get_workspace_host()
+        token = get_oauth_token()
+        volume_path = f"/Volumes/{UC_FULL.replace('.', '/')}/asset_images/{filename}"
+        url = f"{host}/api/2.0/fs/files{volume_path}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        return io.BytesIO(resp.read())
+    except Exception as e:
+        print(f"[PDF] Image fetch failed for {filename}: {e}")
+        return None
+
+
+def _detect_asset_images(text: str) -> list[tuple[str, str]]:
+    """Detect asset types mentioned in the briefing text. Returns [(label, filename)]."""
+    text_lower = text.lower()
+    found = []
+    seen = set()
+    for keyword, filename in ASSET_IMAGE_KEYWORDS.items():
+        if keyword in text_lower and filename not in seen:
+            found.append((keyword.title(), filename))
+            seen.add(filename)
+    return found[:4]  # Max 4 images per briefing
 
 
 def generate_briefing_pdf(
@@ -79,6 +127,21 @@ def generate_briefing_pdf(
 
     # Parse markdown response into PDF elements
     _parse_markdown(response, story, h2, h3, body, warning)
+
+    # Asset images section
+    asset_images = _detect_asset_images(response)
+    if asset_images:
+        story.append(Spacer(1, 0.3*cm))
+        story.append(Paragraph("<b>Related Assets</b>", h2))
+        for label, filename in asset_images:
+            img_data = _fetch_asset_image(filename)
+            if img_data:
+                try:
+                    story.append(Paragraph(f"<i>{label}</i>", small))
+                    story.append(Image(img_data, width=8*cm, height=6*cm, kind='proportional'))
+                    story.append(Spacer(1, 0.2*cm))
+                except Exception as e:
+                    print(f"[PDF] Image embed failed for {filename}: {e}")
 
     # Sources footer
     if sources:

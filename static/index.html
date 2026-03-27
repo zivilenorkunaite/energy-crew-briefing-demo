@@ -700,7 +700,14 @@
 
     async function downloadBriefingPdf(btn) {
       const id = btn.dataset.briefingId;
-      const data = _briefingData[id];
+      let data = _briefingData[id];
+      // Fallback: use the last assistant message from displayMessages
+      if (!data) {
+        const lastAssistant = [...displayMessages].reverse().find(m => m.role === 'assistant');
+        if (lastAssistant) {
+          data = { response: lastAssistant.content, sources: lastAssistant.sources || [] };
+        }
+      }
       if (!data) { alert('Briefing data not found'); return; }
       btn.textContent = '⏳ Generating...';
       btn.disabled = true;
