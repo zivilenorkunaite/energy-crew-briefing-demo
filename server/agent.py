@@ -90,16 +90,22 @@ def _get_sydney_time() -> tuple[str, str]:
 _CREW_LIST = CREW_LIST_STRING
 
 
-def _build_supervisor_prompt() -> str:
-    """Build supervisor prompt from loaded template."""
-    date_str, time_str = _get_sydney_time()
+def _build_supervisor_prompt(client_date: str | None = None, client_time: str | None = None) -> str:
+    """Build supervisor prompt. Uses client browser time if provided, falls back to server time."""
+    if client_date and client_time:
+        date_str, time_str = client_date, client_time
+    else:
+        date_str, time_str = _get_sydney_time()
     template = _supervisor_prompt_template or "You are a tool-routing supervisor."
     return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).replace("{{crew_list}}", _CREW_LIST).format(date_str=date_str, time_str=time_str, crew_list=_CREW_LIST)
 
 
-def _build_writer_prompt() -> str:
-    """Build writer prompt from loaded template."""
-    date_str, time_str = _get_sydney_time()
+def _build_writer_prompt(client_date: str | None = None, client_time: str | None = None) -> str:
+    """Build writer prompt. Uses client browser time if provided, falls back to server time."""
+    if client_date and client_time:
+        date_str, time_str = client_date, client_time
+    else:
+        date_str, time_str = _get_sydney_time()
     template = _writer_prompt_template or "You are a field operations assistant."
     return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).format(date_str=date_str, time_str=time_str)
 
@@ -501,7 +507,8 @@ def _emit_result_step(stype: str, result_text: str, all_steps: list, on_step):
 
 # ── Agent Loop ──────────────────────────────────────────────────────────────
 
-async def run_agent(user_message: str, history: list[dict], on_step=None, on_token=None) -> dict:
+async def run_agent(user_message: str, history: list[dict], on_step=None, on_token=None,
+                    client_date: str | None = None, client_time: str | None = None) -> dict:
     """
     Run the dual-agent loop with MLflow tracing.
 
@@ -519,7 +526,7 @@ async def run_agent(user_message: str, history: list[dict], on_step=None, on_tok
                     "supervisor_model": SUPERVISOR_MODEL,
                     "writer_model": LLM_MODEL,
                 })
-                result = await _run_agent_inner(user_message, history, root, on_step, on_token)
+                result = await _run_agent_inner(user_message, history, root, on_step, on_token, client_date, client_time)
                 root.set_outputs({"response_length": len(result.get("response", "")), "sources": result.get("sources", [])})
                 trace.__exit__(None, None, None)
                 # Flush traces to Databricks
@@ -533,10 +540,11 @@ async def run_agent(user_message: str, history: list[dict], on_step=None, on_tok
                 raise
         except Exception as e:
             print(f"[AGENT] Tracing wrapper error: {e}")
-    return await _run_agent_inner(user_message, history, None, on_step, on_token)
+    return await _run_agent_inner(user_message, history, None, on_step, on_token, client_date, client_time)
 
 
-async def _run_agent_inner(user_message: str, history: list[dict], root_span, on_step=None, on_token=None) -> dict:
+async def _run_agent_inner(user_message: str, history: list[dict], root_span, on_step=None, on_token=None,
+                           client_date: str | None = None, client_time: str | None = None) -> dict:
     """Dual-agent inner loop: Haiku supervisor + Claude writer."""
     all_steps = []
     _emit_step({"type": "agent", "action": "thinking", "detail": "Analysing your question and planning approach"}, all_steps, on_step)
@@ -576,7 +584,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
                 with mlflow.start_span(name=f"supervisor_{iteration}", span_type="LLM") as sv_span:
                     sv_span.set_inputs({"model": SUPERVISOR_MODEL, "message_count": len(supervisor_messages), "iteration": iteration})
                     sv_response = await _call_llm(
-                        _build_supervisor_prompt(),
+                        _build_supervisor_prompt(client_date, client_time),
                         supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
                         model=SUPERVISOR_MODEL,
                     )
@@ -587,13 +595,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
             except Exception as e:
                 print(f"[SUPERVISOR] Span error: {e}")
                 sv_response = await _call_llm(
-                    _build_supervisor_prompt(),
+                    _build_supervisor_prompt(client_date, client_time),
                     supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
                     model=SUPERVISOR_MODEL,
                 )
         else:
             sv_response = await _call_llm(
-                _build_supervisor_prompt(),
+                _build_supervisor_prompt(client_date, client_time),
                 supervisor_messages, tools=TOOLS, max_tokens=800, temperature=0.0,
                 model=SUPERVISOR_MODEL,
             )
@@ -694,7 +702,7 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
             with mlflow.start_span(name="writer", span_type="LLM") as wr_span:
                 wr_span.set_inputs({"model": LLM_MODEL, "tool_results_count": len(tool_results_for_writer)})
                 final_text = await _call_llm_stream(
-                    _build_writer_prompt(),
+                    _build_writer_prompt(client_date, client_time),
                     writer_messages, max_tokens=4000,
                     on_token=on_token,
                 )
@@ -702,13 +710,13 @@ async def _run_agent_inner(user_message: str, history: list[dict], root_span, on
         except Exception as e:
             print(f"[WRITER] Span error: {e}")
             final_text = await _call_llm_stream(
-                _build_writer_prompt(),
+                _build_writer_prompt(client_date, client_time),
                 writer_messages, max_tokens=4000,
                 on_token=on_token,
             )
     else:
         final_text = await _call_llm_stream(
-            _build_writer_prompt(),
+            _build_writer_prompt(client_date, client_time),
             writer_messages, max_tokens=4000,
             on_token=on_token,
         )

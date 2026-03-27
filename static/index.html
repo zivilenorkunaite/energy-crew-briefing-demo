@@ -844,6 +844,8 @@
             message: msg,
             history: agentHistory,
             session_id: currentSession.id,
+            client_date: new Date().toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long', year:'numeric'}),
+            client_time: new Date().toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit', hour12:true}) + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').pop(),
           }),
         });
 

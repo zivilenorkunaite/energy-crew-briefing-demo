@@ -114,6 +114,8 @@ class ChatRequest(BaseModel):
     message: str
     history: list = []
     session_id: str | None = None
+    client_date: str | None = None  # Browser's local date, e.g. "Thursday, 27 March 2025"
+    client_time: str | None = None  # Browser's local time, e.g. "02:30 PM AEST"
 
 
 @app.post("/api/chat")
@@ -131,7 +133,8 @@ async def chat(req: ChatRequest):
 
     async def generate():
         agent_task = asyncio.create_task(
-            run_agent(req.message, req.history, on_step=on_step, on_token=on_token)
+            run_agent(req.message, req.history, on_step=on_step, on_token=on_token,
+                      client_date=req.client_date, client_time=req.client_time)
         )
 
         # Stream step + token events
