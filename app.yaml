@@ -6,8 +6,6 @@ env:
     value: 'databricks-claude-sonnet-4-6'
   - name: GENIE_SPACE_ID
     valueFrom: 'genie-field-ops'
-  - name: SWMS_ENDPOINT
-    value: 'swms-knowledge-assistant-v2'
   - name: TAVILY_API_KEY
     valueFrom: 'tavily-api-key'
   - name: MLFLOW_TRACING_DESTINATION

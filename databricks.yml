@@ -50,8 +50,6 @@ resources:
             value: databricks-claude-sonnet-4-6
           - name: SUPERVISOR_MODEL
             value: databricks-claude-sonnet-4-6
-          - name: SWMS_ENDPOINT
-            value: swms-knowledge-assistant-v2
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
           - name: GENIE_SPACE_ID
