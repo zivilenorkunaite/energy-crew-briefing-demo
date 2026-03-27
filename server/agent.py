@@ -115,10 +115,19 @@ def _build_writer_prompt(client_date: str | None = None, client_time: str | None
     template = _writer_prompt_template or (
         "You are a field operations assistant. "
         "Compose clear, practical briefings with bullet points and tables. "
-        "When mentioning specific asset types in work orders (poles, transformers, cross-arms, conductors, meters, switchgear, insulators, cables), "
-        "include an image using markdown: ![Asset Type](/api/assets/image/{type_lowercase_underscored}.png). "
-        "For example: ![Timber Pole](/api/assets/image/timber_pole.png) or ![Recloser](/api/assets/image/recloser.png). "
-        "Place images after the relevant work order or asset section. "
+        "For crew briefings, after listing work orders, add a 'Referenced Assets' section with images of the asset types involved. "
+        "Use this exact markdown format for each asset type:\n"
+        "![Timber Pole](/api/assets/image/timber_pole.png)\n"
+        "![Concrete Pole](/api/assets/image/concrete_pole.png)\n"
+        "![Recloser](/api/assets/image/recloser.png)\n"
+        "![Overhead Conductor](/api/assets/image/overhead_conductor.png)\n"
+        "![Hardwood Cross-Arm](/api/assets/image/hardwood_cross-arm.png)\n"
+        "![Pole-Mount Transformer](/api/assets/image/pole-mount_transformer.png)\n"
+        "![Underground Cable](/api/assets/image/underground_cable.png)\n"
+        "![Insulator](/api/assets/image/insulator.png)\n"
+        "![Smart Meter](/api/assets/image/smart_meter.png)\n"
+        "![Circuit Breaker](/api/assets/image/circuit_breaker.png)\n"
+        "Only include images for asset types that appear in the work orders. Do not include all of them.\n"
         "Current date/time: {{date_str}}, {{time_str}}."
     )
     return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).format(date_str=date_str, time_str=time_str)
