@@ -116,7 +116,9 @@ def _build_writer_prompt(client_date: str | None = None, client_time: str | None
         "You are a field operations assistant. "
         "Compose clear, practical briefings with bullet points and tables. "
         "Keep responses practical — field crews need clarity, not prose. "
-        "For crew briefings, structure as: Work Summary, Tasks, Weather, Safety Requirements (PPE, Isolation, Hazards), Local Notices. "
+        "For crew briefings, structure as: Work Summary (include each work order with its assigned asset number, asset type, location, and condition), "
+        "Tasks, Assets (list each referenced asset with its number, type, and condition rating in a table), "
+        "Weather, Safety Requirements (PPE, Isolation, Hazards), Local Notices. "
         "Current date/time: {{date_str}}, {{time_str}}."
     )
     return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).format(date_str=date_str, time_str=time_str)
@@ -442,6 +444,62 @@ def _build_source(name: str, args: dict, cached: bool = False) -> dict:
     return {}
 
 
+async def _enrich_with_assets(genie_result: str) -> str:
+    """Append asset details to Genie work order results by querying the assets table."""
+    import re
+    # Extract asset_id values from the Genie result table
+    asset_ids = set()
+    for match in re.findall(r'\b(\d{1,5})\b', genie_result):
+        val = int(match)
+        if 1 <= val <= 999:  # Plausible asset IDs
+            asset_ids.add(val)
+
+    if not asset_ids:
+        return genie_result
+
+    # Query assets table for these IDs
+    host = get_workspace_host()
+    token = get_oauth_token()
+    warehouse_id = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "")
+    if not warehouse_id:
+        return genie_result
+
+    ids_str = ",".join(str(i) for i in sorted(asset_ids)[:20])
+    sql = (
+        f"SELECT id, asset_number, asset_type, location, condition_rating "
+        f"FROM {UC_FULL}.assets WHERE id IN ({ids_str})"
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{host}/api/2.0/sql/statements/",
+                json={"statement": sql, "warehouse_id": warehouse_id, "format": "JSON_ARRAY", "wait_timeout": "15s"},
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                data = await resp.json()
+
+        if data.get("status", {}).get("state") != "SUCCEEDED":
+            return genie_result
+
+        rows = data.get("result", {}).get("data_array", [])
+        if not rows:
+            return genie_result
+
+        # Append asset details section
+        asset_lines = ["\n\n**Referenced Assets:**\n"]
+        asset_lines.append("| Asset # | Type | Location | Condition |")
+        asset_lines.append("|---|---|---|---|")
+        for r in rows:
+            asset_lines.append(f"| {r[1]} | {r[2]} | {r[3]} | {r[4]} |")
+
+        return genie_result + "\n".join(asset_lines)
+    except Exception as e:
+        print(f"[AGENT] Asset enrichment failed: {e}")
+        return genie_result
+
+
 async def _execute_tool_uncached(name: str, args: dict) -> tuple[str, dict]:
     """Execute a tool call (no cache). Returns (result_text, source_info)."""
     if name == "query_genie":
@@ -449,6 +507,9 @@ async def _execute_tool_uncached(name: str, args: dict) -> tuple[str, dict]:
         print(f"[AGENT] Genie query: {question}")
         try:
             result = await query_genie(question)
+            # Enrich with asset details if work orders found
+            if result and "asset_id" in result.lower() or ("wo_number" in result.lower() and result.count("|") > 5):
+                result = await _enrich_with_assets(result)
         except BaseException as e:
             result = f"(Genie query failed: {_unwrap_exception(e)})"
         return result, _build_source(name, args)
