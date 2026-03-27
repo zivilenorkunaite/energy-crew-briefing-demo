@@ -1,15 +1,12 @@
-"""Phase 2: Create Lakebase instance + database + tables for conversation memory.
+"""Create Lakebase tables for conversation memory and caching.
 
-Run once from local machine with Databricks CLI configured (DEFAULT profile).
+The Lakebase instance + database are created by DAB (databricks.yml).
+This script creates the application tables + grants SP access.
 
-Steps:
-  1. Create Lakebase instance 'energy-crew-briefing' + database 'crew_briefing'
-  2. Create conversations + messages tables (via psycopg2)
-  3. Grant App SP connect + table access
+Run with: python3 setup/02_lakebase.py
 """
 
 import json
-import time
 import sys
 import os
 
@@ -20,103 +17,38 @@ LAKEBASE_INSTANCE = "energy-crew-briefing"
 DATABASE = "crew_briefing"
 
 
-def step1_create_instance():
-    """Create Lakebase instance and database."""
-    print("\n=== Step 1: Create Lakebase instance ===")
-
-    # Check if instance exists
+def get_lakebase_host():
+    """Get the Lakebase read/write DNS."""
     result = run_cli(["database", "get-database-instance", LAKEBASE_INSTANCE])
-    if result and isinstance(result, dict) and result.get("name") == LAKEBASE_INSTANCE:
-        state = result.get("state", "")
-        print(f"  Instance '{LAKEBASE_INSTANCE}' already exists (state: {state})")
+    if result and isinstance(result, dict):
         host = result.get("read_write_dns", "")
-        if host:
-            print(f"  PGHOST: {host}")
-        return result
-
-    print(f"  Creating instance '{LAKEBASE_INSTANCE}'...")
-    result = run_cli([
-        "database", "create-database-instance",
-        LAKEBASE_INSTANCE,
-        "--capacity", "CU_1",
-    ])
-    if not result:
-        print("  Failed to create instance.")
-        sys.exit(1)
-
-    # Poll until ready
-    for i in range(60):
-        time.sleep(10)
-        result = run_cli(["database", "get-database-instance", LAKEBASE_INSTANCE])
-        if result and isinstance(result, dict):
-            state = result.get("state", "")
-            print(f"  [{i*10}s] Instance state: {state}")
-            if state in ("RUNNING", "AVAILABLE"):
-                host = result.get("read_write_dns", "")
-                print(f"  PGHOST: {host}")
-                return result
-    print("  WARNING: Instance not ready in 10 minutes.")
-    return result
+        state = result.get("state", "")
+        print(f"  Instance: {LAKEBASE_INSTANCE} (state: {state})")
+        print(f"  PGHOST: {host}")
+        return host
+    print(f"  Instance '{LAKEBASE_INSTANCE}' not found — run 'databricks bundle deploy' first")
+    sys.exit(1)
 
 
-def step2_create_database_and_tables():
-    """Create database and tables using psycopg2."""
-    print("\n=== Step 2: Create database + tables ===")
+def create_tables():
+    """Create application tables in the Lakebase database."""
+    print("\n=== Creating tables ===")
 
-    # Get instance details
-    result = run_cli(["database", "get-database-instance", LAKEBASE_INSTANCE])
-    if not result or not isinstance(result, dict):
-        print("  Cannot get instance details.")
-        sys.exit(1)
+    host = get_lakebase_host()
 
-    host = result.get("read_write_dns", "")
-    if not host:
-        print("  No read_write_dns found.")
-        sys.exit(1)
-
-    # Get token
-    token_result = run_cli([
+    # Generate credential
+    cred = run_cli([
         "database", "generate-database-credential",
         "--json", json.dumps({"instance_names": [LAKEBASE_INSTANCE]}),
     ])
-    if not token_result or not isinstance(token_result, dict):
-        print("  Cannot generate database credential.")
+    if not cred or not cred.get("token"):
+        print("  Cannot generate database credential")
         sys.exit(1)
-    token = token_result.get("token", "")
 
     import psycopg2
-
-    # Create database
-    print(f"  Connecting to {host} to create database '{DATABASE}'...")
     conn = psycopg2.connect(
-        host=host,
-        port=5432,
-        database="databricks_postgres",
-        user=get_user(),
-        password=token,
-        sslmode="require",
-    )
-    conn.autocommit = True
-    cur = conn.cursor()
-
-    cur.execute("SELECT datname FROM pg_database WHERE datname = %s", (DATABASE,))
-    if cur.fetchone():
-        print(f"  Database '{DATABASE}' already exists.")
-    else:
-        cur.execute(f'CREATE DATABASE "{DATABASE}"')
-        print(f"  Database '{DATABASE}' created.")
-    cur.close()
-    conn.close()
-
-    # Create tables in the new database
-    print(f"  Creating tables in '{DATABASE}'...")
-    conn = psycopg2.connect(
-        host=host,
-        port=5432,
-        database=DATABASE,
-        user=get_user(),
-        password=token,
-        sslmode="require",
+        host=host, port=5432, database=DATABASE,
+        user=get_user(), password=cred["token"], sslmode="require",
     )
     conn.autocommit = True
     cur = conn.cursor()
@@ -143,9 +75,7 @@ def step2_create_database_and_tables():
         )
     """)
 
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)
-    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS tool_cache (
@@ -166,33 +96,29 @@ def step2_create_database_and_tables():
         )
     """)
 
-    print("  Tables created (conversations, messages, tool_cache, app_settings).")
+    print("  Tables created (conversations, messages, tool_cache, app_settings)")
+
+    # Grant SP access to tables
+    sp_id = get_app_sp_id()
+    if sp_id:
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (sp_id,))
+        if cur.fetchone():
+            cur.execute(f'GRANT ALL ON ALL TABLES IN SCHEMA public TO "{sp_id}"')
+            cur.execute(f'GRANT USAGE, CREATE ON SCHEMA public TO "{sp_id}"')
+            cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{sp_id}"')
+            cur.execute(f'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO "{sp_id}"')
+            cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE ON SEQUENCES TO "{sp_id}"')
+            print(f"  SP table grants applied ({sp_id[:20]}...)")
+        else:
+            print(f"  SP role not yet created — will be created by DAB on next deploy")
+
     cur.close()
     conn.close()
 
 
-def step3_grant_sp():
-    """Grant App SP connect + table access."""
-    print("\n=== Step 3: Grant SP access ===")
-    sp_id = get_app_sp_id()
-    print(f"  Granting CONNECT on instance '{LAKEBASE_INSTANCE}' to SP {sp_id}...")
-
-    # Grant via the database permissions API
-    run_cli([
-        "database", "grant-database-access",
-        LAKEBASE_INSTANCE,
-        "--principal-type", "SERVICE_PRINCIPAL",
-        "--principal-id", sp_id,
-    ])
-
-    print("  Done.")
-
-
 if __name__ == "__main__":
     print("=" * 60)
-    print("Phase 2: Lakebase Conversation Memory Setup")
+    print("Lakebase Tables Setup")
     print("=" * 60)
-    step1_create_instance()
-    step2_create_database_and_tables()
-    step3_grant_sp()
-    print("\n=== Phase 2 complete ===")
+    create_tables()
+    print("\n=== Done ===")

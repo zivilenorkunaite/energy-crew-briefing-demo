@@ -1,7 +1,7 @@
-"""Lakebase Autoscaling — async connection pool with OAuth token rotation.
+"""Lakebase connection pool with OAuth token rotation.
 
-Uses PGHOST, PGPORT, PGDATABASE, PGUSER from the database app resource;
-tokens are generated via WorkspaceClient().postgres.generate_database_credential().
+Uses PGHOST, PGPORT, PGDATABASE auto-injected by the database app resource.
+Auth via WorkspaceClient OAuth token (not generate_database_credential).
 """
 
 import os
@@ -9,53 +9,35 @@ import asyncpg
 from typing import Optional, List, Any
 
 SCHEMA = os.environ.get("PGSCHEMA", "public")
-_ENDPOINT_NAME = os.environ.get("ENDPOINT_NAME", "energy-crew-briefing")
 
 
-def _generate_token() -> str:
-    """Generate a fresh OAuth token for Lakebase."""
+def _get_oauth_token() -> str:
+    """Get OAuth token for Lakebase auth via WorkspaceClient."""
     from databricks.sdk import WorkspaceClient
-    import json
     w = WorkspaceClient()
-    host = w.config.host
+    token = w.config.oauth_token().access_token
+    if not token:
+        raise RuntimeError("WorkspaceClient returned no OAuth token")
+    print(f"[DB] OAuth token obtained ({len(token)} chars)")
+    return token
 
-    # Method 1: Use workspace OAuth token directly as PostgreSQL password
-    # This works when the SP has a PostgreSQL role matching its client ID
+
+def _get_pg_user() -> str:
+    """Get PostgreSQL username — auto-injected PGUSER or SP identity."""
+    pg_user = os.environ.get("PGUSER")
+    if pg_user:
+        return pg_user
+    # Fallback: get current user from SDK
     try:
-        auth = w.config.authenticate()
-        bearer = auth.get("Authorization", "")
-        if bearer:
-            token = bearer.replace("Bearer ", "")
-            print(f"[DB] Using workspace OAuth token ({len(token)} chars)")
-            return token
-    except Exception as e:
-        print(f"[DB] OAuth token failed: {e}")
-
-    # Method 2: SDK database credential API
-    try:
-        cred = w.database.generate_database_credential(instance_names=[_ENDPOINT_NAME])
-        token = getattr(cred, "token", None) or getattr(cred, "password", "")
-        if token:
-            print(f"[DB] Lakebase token via database SDK ({len(token)} chars)")
-            return token
-    except Exception as e:
-        print(f"[DB] database SDK failed: {e}")
-
-    # Method 3: SDK postgres API (AWS Lakebase Autoscaling)
-    try:
-        cred = w.postgres.generate_database_credential(endpoint=_ENDPOINT_NAME)
-        token = getattr(cred, "token", None) or getattr(cred, "password", "")
-        if token:
-            print(f"[DB] Lakebase token via postgres SDK ({len(token)} chars)")
-            return token
-    except Exception as e:
-        print(f"[DB] postgres SDK failed: {e}")
-
-    raise RuntimeError("Could not generate Lakebase credential")
+        from databricks.sdk import WorkspaceClient
+        w = WorkspaceClient()
+        return w.current_user.me().user_name
+    except Exception:
+        return os.environ.get("DATABRICKS_CLIENT_ID", "")
 
 
 class DatabasePool:
-    """Async database pool with OAuth token refresh for Lakebase Autoscaling."""
+    """Async database pool with OAuth token refresh for Lakebase."""
 
     def __init__(self):
         self._pool: Optional[asyncpg.Pool] = None
@@ -73,17 +55,11 @@ class DatabasePool:
             except (ValueError, TypeError):
                 pg_port = 5432
 
-            pg_db = os.environ.get("PGDATABASE", "databricks_postgres")
-            pg_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
+            pg_db = os.environ.get("PGDATABASE", "crew_briefing")
+            pg_user = _get_pg_user()
+            token = _get_oauth_token()
+
             print(f"[DB] Connecting: host={pg_host[:30]}... db={pg_db} user={pg_user[:20]}... port={pg_port}")
-            # Use platform-injected PGPASSWORD, or generate via API
-            token = os.environ.get("PGPASSWORD", "")
-            if not token:
-                try:
-                    token = _generate_token()
-                except Exception as e:
-                    print(f"[DB] Token generation failed: {e}")
-                    raise RuntimeError(f"No PGPASSWORD and token generation failed: {e}")
 
             self._pool = await asyncpg.create_pool(
                 host=pg_host,
@@ -93,41 +69,37 @@ class DatabasePool:
                 password=token,
                 ssl="require",
                 min_size=1,
-                max_size=10,
-                command_timeout=60,
+                max_size=5,
             )
-            print(f"[DB] Connected to Lakebase at {pg_host}")
-
+            print("[DB] Pool created")
         return self._pool
 
     async def refresh_token(self):
-        """Refresh database token (tokens expire after ~1h)."""
+        """Refresh the OAuth token for existing connections."""
         if self._pool:
+            token = _get_oauth_token()
+            # asyncpg doesn't support password rotation directly,
+            # so we close and recreate the pool
             await self._pool.close()
             self._pool = None
-        await self.get_pool()
+            await self.get_pool()
+            print("[DB] Pool refreshed with new token")
 
-    async def execute(self, sql: str, *args) -> str:
+    async def execute(self, query: str, *args) -> str:
         pool = await self.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.execute(sql, *args)
+        return await pool.execute(query, *args)
 
-    async def fetch(self, sql: str, *args) -> List[Any]:
+    async def fetch(self, query: str, *args) -> List[asyncpg.Record]:
         pool = await self.get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql, *args)
-            return [dict(r) for r in rows]
+        return await pool.fetch(query, *args)
 
-    async def fetchrow(self, sql: str, *args) -> Optional[dict]:
+    async def fetchrow(self, query: str, *args) -> Optional[asyncpg.Record]:
         pool = await self.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, *args)
-            return dict(row) if row else None
+        return await pool.fetchrow(query, *args)
 
-    async def fetchval(self, sql: str, *args) -> Any:
+    async def fetchval(self, query: str, *args) -> Any:
         pool = await self.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchval(sql, *args)
+        return await pool.fetchval(query, *args)
 
     async def close(self):
         if self._pool:

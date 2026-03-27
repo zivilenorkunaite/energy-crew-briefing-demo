@@ -17,6 +17,18 @@ sync:
     - mermaid-config.json
 
 resources:
+  database_instances:
+    crew-briefing-db:
+      name: energy-crew-briefing
+      capacity: CU_1
+
+  database_catalogs:
+    crew-briefing-catalog:
+      database_instance_name: ${resources.database_instances.crew-briefing-db.name}
+      database_name: crew_briefing
+      name: crew_briefing_catalog
+      create_database_if_not_exists: true
+
   apps:
     energy-crew-briefing:
       name: energy-crew-briefing
@@ -44,16 +56,6 @@ resources:
             value_from: tavily-api-key
           - name: GENIE_SPACE_ID
             value_from: genie-field-ops
-          - name: PGHOST
-            value: ep-dawn-feather-e4q3n8u1.database.australiaeast.azuredatabricks.net
-          - name: PGDATABASE
-            value: crew_briefing
-          - name: PGPORT
-            value: "5432"
-          - name: PGSSLMODE
-            value: require
-          - name: ENDPOINT_NAME
-            value: "energy-crew-briefing"
           - name: MLFLOW_TRACING_DESTINATION
             value: main.energy_crew_briefing
           - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
@@ -64,7 +66,12 @@ resources:
             value: v4
 
       resources:
-        # swms-v2 resource: add after deploying SWMS endpoint (setup/06_swms_agent.py)
+        - name: app-db
+          description: "Lakebase database for session persistence and caching"
+          database:
+            database_name: ${resources.database_catalogs.crew-briefing-catalog.database_name}
+            instance_name: ${resources.database_catalogs.crew-briefing-catalog.database_instance_name}
+            permission: CAN_CONNECT_AND_CREATE
 
         - name: tavily-api-key
           description: "Tavily API key for web search"
@@ -72,8 +79,6 @@ resources:
             scope: energy-crew-briefing
             key: tavily-api-key
             permission: READ
-
-        # Lakebase postgres resource managed via REST API in deploy.sh (not supported in bundles)
 
   jobs:
     bom-weather-refresh:

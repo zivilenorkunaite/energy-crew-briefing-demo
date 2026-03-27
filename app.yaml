@@ -10,16 +10,6 @@ env:
     value: 'swms-knowledge-assistant-v2'
   - name: TAVILY_API_KEY
     valueFrom: 'tavily-api-key'
-  - name: PGHOST
-    value: 'ep-dawn-feather-e4q3n8u1.database.australiaeast.azuredatabricks.net'
-  - name: PGDATABASE
-    value: 'crew_briefing'
-  - name: PGPORT
-    value: '5432'
-  - name: PGSSLMODE
-    value: 'require'
-  - name: ENDPOINT_NAME
-    value: 'energy-crew-briefing'
   - name: MLFLOW_TRACING_DESTINATION
     value: 'main.energy_crew_briefing'
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
