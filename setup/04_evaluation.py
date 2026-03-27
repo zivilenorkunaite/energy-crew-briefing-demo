@@ -22,7 +22,7 @@ mlflow.set_experiment(EXPERIMENT_PATH)
 # Ground-truth evaluation dataset
 eval_data = pd.DataFrame([
     {
-        "question": "Prepare a briefing for Crew Alpha tomorrow",
+        "question": "Prepare a briefing for Townsville Lines A tomorrow",
         "expected_tools": "query_genie,get_swms,search_local_notices",
         "expected_sections": "Work Summary,Safety Requirements,Local Notices",
         "category": "briefing",
@@ -34,7 +34,7 @@ eval_data = pd.DataFrame([
         "category": "swms",
     },
     {
-        "question": "What is Crew Hotel working on this week?",
+        "question": "What is Cairns Lines working on this week?",
         "expected_tools": "query_genie",
         "expected_sections": "work orders,tasks",
         "category": "genie",

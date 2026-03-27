@@ -37,6 +37,7 @@ except Exception as e:
 from server.customise import (
     APP_TITLE, COMPANY_NAME, PAGE_TITLE, APP_DISPLAY, APP_SUBTITLE,
     COLOR_PRIMARY, COLOR_PRIMARY_LIGHT, COLOR_ACCENT, COLOR_ACCENT_LIGHT, COLOR_USER_BG,
+    CREWS, DEPOTS,
 )
 
 
@@ -243,6 +244,30 @@ async def branding():
             "user_bg": COLOR_USER_BG,
         },
     }
+
+
+@app.get("/api/suggestions")
+async def suggestions():
+    """Return dynamic example questions using crew names and locations from config."""
+    import random
+    crew_names = list(CREWS.keys())
+    depot_names = [d["name"] for d in DEPOTS.values()]
+    # Pick a few crews and depots for variety
+    c1 = crew_names[0] if crew_names else "Crew A"
+    c2 = next((n for n in crew_names if "Emergency" in n or "Inspection" in n), crew_names[1] if len(crew_names) > 1 else c1)
+    c3 = next((n for n in crew_names if "Substation" in n or "Cable" in n), crew_names[2] if len(crew_names) > 2 else c1)
+    d1 = depot_names[0] if depot_names else "Town A"
+    d2 = depot_names[1] if len(depot_names) > 1 else d1
+    return [
+        f"Prepare a crew briefing for {c1} tomorrow",
+        f"What work orders does {c3} have scheduled this week?",
+        f"Prepare a briefing for {c2} for the day after tomorrow",
+        "What PPE and isolation procedures are needed for overhead line replacement?",
+        f"Are there any road closures or community events near {d2} this week?",
+        "Which crews have the most overdue work orders right now?",
+        f"What's the weather forecast for {d1} tomorrow? Safe for elevated work?",
+        "What assets are in critical condition?",
+    ]
 
 
 # ── Cache endpoints ───────────────────────────────────────────────────────

@@ -1,13 +1,13 @@
 """Create Genie Room for field operations data.
 
-Creates a Genie Room pointing to the work_orders, work_tasks, assets, and asset_types tables.
-Uses serialized_space format required by the API.
+Uses the Genie Space API with serialized_space format.
 Idempotent — skips if a room with the same title already exists.
 
 Run with: python3 setup/12_genie_room.py
 """
 
 import json
+import hashlib
 import sys
 import os
 
@@ -19,20 +19,39 @@ ROOM_DESCRIPTION = (
     "Field operations data for energy distribution crews. "
     "Ask about work orders, crew assignments, task schedules, assets, and project status."
 )
+
+TABLES = sorted([
+    {
+        "identifier": f"{UC_FULL}.asset_types",
+        "description": ["Asset type lookup table with categories, typical lifespan, and inspection intervals."],
+    },
+    {
+        "identifier": f"{UC_FULL}.assets",
+        "description": ["Individual network assets with type, location, condition rating, and inspection dates."],
+    },
+    {
+        "identifier": f"{UC_FULL}.work_orders",
+        "description": ["Work orders assigned to field crews. Includes type, priority, status, scheduled and completed dates."],
+    },
+    {
+        "identifier": f"{UC_FULL}.work_tasks",
+        "description": ["Individual tasks within work orders. Each task is assigned to a crew member."],
+    },
+], key=lambda t: t["identifier"])
+
 SAMPLE_QUESTIONS = [
     "What work orders are scheduled for tomorrow?",
     "Show overdue work orders by crew",
     "Which crews have the most work orders this week?",
     "What assets are in critical condition?",
     "Show work order status breakdown by type",
+    "How many open work orders does each depot have?",
 ]
 
-TABLES = [
-    f"{UC_FULL}.work_orders",
-    f"{UC_FULL}.work_tasks",
-    f"{UC_FULL}.assets",
-    f"{UC_FULL}.asset_types",
-]
+
+def _hex_id(seed: str) -> str:
+    """Generate a 32-char hex ID from a seed string."""
+    return hashlib.md5(seed.encode()).hexdigest()
 
 
 def step1_create_room():
@@ -48,19 +67,25 @@ def step1_create_room():
                 print(f"  Room already exists: {ROOM_TITLE} (ID: {space_id})")
                 return space_id
 
-    # Build serialized_space (required by the API)
-    serialized_space = json.dumps({
+    # Build serialized_space per API docs
+    serialized = {
         "version": 2,
-        "data_sources": {
-            "tables": [{"identifier": t} for t in sorted(TABLES)],
+        "config": {
+            "sample_questions": [
+                {"id": _hex_id(f"sq-{i}"), "question": [q]}
+                for i, q in enumerate(SAMPLE_QUESTIONS)
+            ],
         },
-    })
+        "data_sources": {
+            "tables": TABLES,
+        },
+    }
 
     payload = {
         "title": ROOM_TITLE,
         "description": ROOM_DESCRIPTION,
         "warehouse_id": get_warehouse_id(),
-        "serialized_space": serialized_space,
+        "serialized_space": json.dumps(serialized),
     }
 
     result = run_cli([
@@ -85,15 +110,16 @@ def step2_grant_access(space_id: str):
     """Grant App SP CAN_RUN on the Genie Room."""
     print(f"\n=== Step 2: Grant CAN_RUN to App SP ===")
 
-    sp_id = get_app_sp_id()
-    if not sp_id:
+    sp_name = get_app_sp_id()
+    if not sp_name:
         print("  Skipping — no App SP found (app not yet deployed)")
         return
 
+    # Try with service_principal_name (application ID format)
     payload = {
         "access_control_list": [
             {
-                "service_principal_name": sp_id,
+                "service_principal_name": sp_name,
                 "permission_level": "CAN_RUN",
             }
         ]
@@ -104,10 +130,10 @@ def step2_grant_access(space_id: str):
         "--json", json.dumps(payload),
     ])
 
-    if result:
+    if result and not isinstance(result, str):
         print("  CAN_RUN granted.")
     else:
-        print("  Warning: grant may have failed. Check manually.")
+        print(f"  Warning: SP grant may have failed. Grant manually in Genie Room settings.")
 
 
 if __name__ == "__main__":
@@ -120,7 +146,6 @@ if __name__ == "__main__":
         step2_grant_access(space_id)
         print(f"\n{'=' * 60}")
         print(f"Genie Room ID: {space_id}")
-        print(f"")
         print(f"Update databricks.yml with this space_id if different from current.")
         print(f"{'=' * 60}")
     else:
