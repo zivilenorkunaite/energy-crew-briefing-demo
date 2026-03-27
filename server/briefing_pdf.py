@@ -237,7 +237,7 @@ def _flush_table(story, rows, cols):
     """Render a markdown table as a ReportLab Table."""
     if not cols:
         return
-    all_rows = [cols] + rows
+    all_rows = [[_sanitize(cell) for cell in row] for row in [cols] + rows]
     col_count = len(cols)
     available = 17 * cm
     col_width = available / col_count if col_count else available
@@ -285,6 +285,7 @@ def _strip_bold(text: str) -> str:
 
 def _md_to_html(text: str) -> str:
     """Convert basic markdown bold/italic to ReportLab HTML."""
+    text = _sanitize(text)
     text = _escape(text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)

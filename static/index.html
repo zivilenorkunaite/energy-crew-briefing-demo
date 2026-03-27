@@ -188,6 +188,12 @@
     .assistant .bubble table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 8px 0; }
     .assistant .bubble th { background: var(--brand-primary); color: white; padding: 5px 8px; text-align: left; font-weight: 600; }
     .assistant .bubble img { max-width: 200px; height: auto; border-radius: 8px; margin: 8px 0; border: 1px solid #e2e8f0; }
+    .asset-gallery { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; }
+    .asset-card { width: 160px; background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; font-size: 11px; }
+    .asset-card img { width: 100%; height: 100px; object-fit: cover; }
+    .asset-card .asset-info { padding: 6px 8px; }
+    .asset-card .asset-info strong { display: block; font-size: 12px; margin-bottom: 2px; }
+    .asset-card .asset-info .asset-meta { color: #718096; }
     .assistant .bubble td { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; }
     .assistant .bubble tr:nth-child(even) td { background: #fafafa; }
     .assistant .bubble code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
@@ -699,6 +705,27 @@
     // Store briefing data for PDF download (avoids HTML attribute encoding issues)
     const _briefingData = {};
 
+    async function loadAssetGallery(container, crew) {
+      try {
+        const res = await fetch(`/api/assets/for-crew?crew=${encodeURIComponent(crew)}`, {credentials: 'include'});
+        if (!res.ok) return;
+        const assets = await res.json();
+        if (!assets.length) return;
+        const gallery = document.createElement('div');
+        gallery.className = 'asset-gallery';
+        gallery.innerHTML = '<div style="width:100%;font-weight:600;font-size:13px;margin-bottom:4px;color:var(--brand-primary);">Referenced Assets</div>' +
+          assets.map(a => `<div class="asset-card">
+            ${a.image_url ? `<img src="${a.image_url}" alt="${a.asset_type}" loading="lazy">` : ''}
+            <div class="asset-info">
+              <strong>${a.asset_type}</strong>
+              <div class="asset-meta">${a.asset_number} &middot; ${a.location}</div>
+              <div class="asset-meta">Condition: ${a.condition}</div>
+            </div>
+          </div>`).join('');
+        container.appendChild(gallery);
+      } catch (e) { console.log('Asset gallery error:', e); }
+    }
+
     async function downloadBriefingPdf(btn) {
       const id = btn.dataset.briefingId;
       let data = _briefingData[id];
@@ -997,6 +1024,13 @@
                 agentHistory = result.history || [];
                 displayMessages.push({ role: 'assistant', content: result.response, sources: result.sources || [], steps: result.steps || collectedSteps });
                 persistCurrentSession();
+                // Load asset gallery for briefings
+                if (_isBriefing(result.sources)) {
+                  const lastMsg = document.querySelector('.msg.assistant:last-child .msg-body');
+                  if (lastMsg && currentSession) {
+                    loadAssetGallery(lastMsg, currentSession.title);
+                  }
+                }
               } else if (eventType === 'error') {
                 const err = JSON.parse(data);
                 removeThinking();

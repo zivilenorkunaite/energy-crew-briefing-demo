@@ -323,6 +323,60 @@ async def briefing_pdf(req: BriefingPdfRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+# ── Asset data endpoints ──────────────────────────────────────────────────
+
+@app.get("/api/assets/for-crew")
+async def assets_for_crew(crew: str, date: str = ""):
+    """Return assets linked to a crew's work orders for a given date range."""
+    import aiohttp
+    from server.config import get_oauth_token, get_workspace_host
+    from server.customise import UC_FULL
+
+    host = get_workspace_host()
+    token = get_oauth_token()
+    warehouse_id = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID", "")
+    if not warehouse_id:
+        return []
+
+    safe_crew = crew.replace("'", "''")
+    date_filter = f"AND wo.scheduled_date = '{date}'" if date else "AND wo.scheduled_date >= current_date()"
+    sql = (
+        f"SELECT DISTINCT a.id, a.asset_number, a.asset_type, a.asset_category, "
+        f"a.location, a.condition_rating, a.image_path "
+        f"FROM {UC_FULL}.work_orders wo "
+        f"JOIN {UC_FULL}.assets a ON wo.asset_id = a.id "
+        f"WHERE wo.assigned_crew = '{safe_crew}' {date_filter} "
+        f"LIMIT 10"
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{host}/api/2.0/sql/statements/",
+                json={"statement": sql, "warehouse_id": warehouse_id, "format": "JSON_ARRAY", "wait_timeout": "30s"},
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                data = await resp.json()
+
+        if data.get("status", {}).get("state") != "SUCCEEDED":
+            return []
+
+        rows = data.get("result", {}).get("data_array", [])
+        assets = []
+        for r in rows:
+            filename = r[6].split("/")[-1] if r[6] else ""
+            assets.append({
+                "id": r[0], "asset_number": r[1], "asset_type": r[2],
+                "category": r[3], "location": r[4], "condition": r[5],
+                "image_url": f"/api/assets/image/{filename}" if filename else "",
+            })
+        return assets
+    except Exception as e:
+        print(f"[ASSETS] Error: {e}")
+        return []
+
+
 # ── Asset image proxy ─────────────────────────────────────────────────────
 
 @app.get("/api/assets/image/{filename}")
