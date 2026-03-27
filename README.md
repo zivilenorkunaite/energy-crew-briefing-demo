@@ -139,7 +139,7 @@ Runs 10 automated phases in dependency order, then deploys:
 
 ### Manual steps after first setup
 
-1. **AI Gateway endpoint** — Create via Databricks UI with model routes (`crew-briefing-llm`, `crew-briefing-small-and-fast-llm`).
+1. **MLflow Prompt Registry** — Enable via workspace UI: Settings → Previews → MLflow Prompt Registry → Enable. Then re-run Phase 10 to register prompts.
 
 2. **Tavily API key** — Get from [tavily.com](https://tavily.com), then:
    ```bash
