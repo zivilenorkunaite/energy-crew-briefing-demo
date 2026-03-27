@@ -180,8 +180,10 @@ def create_lakebase_role(app):
         cur.execute(f'GRANT CONNECT ON DATABASE {LAKEBASE_DATABASE} TO "{sp_client_id}"')
         cur.execute(f'GRANT USAGE, CREATE ON SCHEMA public TO "{sp_client_id}"')
         cur.execute(f'GRANT ALL ON ALL TABLES IN SCHEMA public TO "{sp_client_id}"')
+        cur.execute(f'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO "{sp_client_id}"')
         cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{sp_client_id}"')
-        print("  PostgreSQL grants applied")
+        cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE ON SEQUENCES TO "{sp_client_id}"')
+        print("  PostgreSQL grants applied (tables + sequences)")
 
         cur.close()
         conn.close()
