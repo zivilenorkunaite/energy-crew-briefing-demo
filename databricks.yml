@@ -71,6 +71,19 @@ resources:
             instance_name: ${resources.database_catalogs.crew-briefing-catalog.database_instance_name}
             permission: CAN_CONNECT_AND_CREATE
 
+        - name: genie-field-ops
+          description: "Genie Room — Field Operations"
+          genie_space:
+            name: "Field Operations"
+            space_id: "01f12988ab171f56b8edcdaeeaa633a0"
+            permission: CAN_RUN
+
+        - name: sql-warehouse
+          description: "SQL Warehouse for data queries"
+          sql_warehouse:
+            id: da0168a944ff0baa
+            permission: CAN_USE
+
         - name: tavily-api-key
           description: "Tavily API key for web search"
           secret:
