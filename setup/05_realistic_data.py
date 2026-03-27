@@ -401,6 +401,7 @@ def create_tables():
             estimated_hours DOUBLE,
             actual_hours DOUBLE,
             assigned_crew STRING,
+            location STRING,
             description STRING
         )
     """)
@@ -744,6 +745,7 @@ def generate_work_orders():
                     "estimated_hours": est_hours,
                     "actual_hours": actual_hours,
                     "assigned_crew": crew_name,
+                    "location": loc,
                     "description": desc.replace("'", "''"),
                 })
 
@@ -880,6 +882,7 @@ def generate_work_orders():
                     "estimated_hours": round(random.uniform(2, 8), 1),
                     "actual_hours": None,
                     "assigned_crew": crew_name,
+                    "location": loc,
                     "description": desc_tpl.replace("'", "''"),
                 })
 
@@ -938,11 +941,12 @@ def insert_work_orders(wos: list[dict]):
             desc = w['description'].replace("'", "''") if w['description'] else ""
             title = w['title'].replace("'", "''")
             crew = w['assigned_crew'].replace("'", "''")
+            loc = w.get('location', '').replace("'", "''")
             values.append(
                 f"({w['id']}, '{w['wo_number']}', {w['project_id']}, {w['asset_id']}, "
                 f"'{title}', '{w['wo_type']}', '{w['priority']}', '{w['status']}', "
                 f"'{w['created_date']}', '{w['scheduled_date']}', {cd}, "
-                f"{w['estimated_hours']}, {ah}, '{crew}', '{desc}')"
+                f"{w['estimated_hours']}, {ah}, '{crew}', '{loc}', '{desc}')"
             )
         sql = f"INSERT INTO {UC_FULL}.work_orders VALUES {', '.join(values)}"
         result = run_sql(sql)

@@ -96,7 +96,13 @@ def _build_supervisor_prompt(client_date: str | None = None, client_time: str | 
         date_str, time_str = client_date, client_time
     else:
         date_str, time_str = _get_sydney_time()
-    template = _supervisor_prompt_template or "You are a tool-routing supervisor."
+    template = _supervisor_prompt_template or (
+        "You are a tool-routing supervisor. "
+        "Round 1: call query_genie for work orders. "
+        "If Genie returns work orders, extract the location and proceed to Round 2: call get_swms + query_weather + search_local_notices in parallel using that location. "
+        "If Genie returns no work orders or errors, say DONE immediately. "
+        "Current date/time: {{date_str}}, {{time_str}}. Crews: {{crew_list}}."
+    )
     return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).replace("{{crew_list}}", _CREW_LIST).format(date_str=date_str, time_str=time_str, crew_list=_CREW_LIST)
 
 
