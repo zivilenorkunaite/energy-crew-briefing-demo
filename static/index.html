@@ -695,9 +695,13 @@
       send();
     }
 
+    // Store briefing data for PDF download (avoids HTML attribute encoding issues)
+    const _briefingData = {};
+
     async function downloadBriefingPdf(btn) {
-      const response = decodeURIComponent(escape(atob(btn.dataset.response)));
-      const sources = JSON.parse(btn.dataset.sources || '[]');
+      const id = btn.dataset.briefingId;
+      const data = _briefingData[id];
+      if (!data) { alert('Briefing data not found'); return; }
       btn.textContent = '⏳ Generating...';
       btn.disabled = true;
       try {
@@ -705,8 +709,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            response,
-            sources,
+            response: data.response,
+            sources: data.sources || [],
             crew: currentSession ? currentSession.title : '',
             briefing_date: new Date().toLocaleDateString('en-AU', {day:'numeric', month:'long', year:'numeric'}),
           }),
@@ -721,7 +725,7 @@
         URL.revokeObjectURL(url);
       } catch (e) {
         console.error(e);
-        alert('Failed to generate PDF');
+        alert('Failed to generate PDF: ' + e.message);
       } finally {
         btn.textContent = '📄 Download PDF';
         btn.disabled = false;
@@ -757,7 +761,12 @@
       div.className = 'msg assistant';
       const html = marked.parse(text || '');
       const isBriefing = text && (text.toLowerCase().includes('crew briefing') || text.toLowerCase().includes('work summary') || text.toLowerCase().includes('work orders'));
-      const downloadBtn = isBriefing ? `<div style="margin-top:8px;"><button class="btn-download-pdf" onclick="downloadBriefingPdf(this)" data-response="${btoa(unescape(encodeURIComponent(text)))}" data-sources='${JSON.stringify(sources || [])}' style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>` : '';
+      let downloadBtn = '';
+      if (isBriefing) {
+        const bid = 'b' + Date.now();
+        _briefingData[bid] = { response: text, sources: sources || [] };
+        downloadBtn = `<div style="margin-top:8px;"><button onclick="downloadBriefingPdf(this)" data-briefing-id="${bid}" style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>`;
+      }
       div.innerHTML = `<div class="avatar av-ai">AI</div>
         <div class="msg-body">
           ${buildStepsHtml(steps || [])}
@@ -961,7 +970,9 @@
                     }
                     const isBriefing = result.response && (result.response.toLowerCase().includes('crew briefing') || result.response.toLowerCase().includes('work summary'));
                     if (isBriefing) {
-                      body.insertAdjacentHTML('beforeend', `<div style="margin-top:8px;"><button class="btn-download-pdf" onclick="downloadBriefingPdf(this)" data-response="${btoa(unescape(encodeURIComponent(result.response)))}" data-sources='${JSON.stringify(result.sources || [])}' style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>`);
+                      const bid = 'b' + Date.now();
+                      _briefingData[bid] = { response: result.response, sources: result.sources || [] };
+                      body.insertAdjacentHTML('beforeend', `<div style="margin-top:8px;"><button onclick="downloadBriefingPdf(this)" data-briefing-id="${bid}" style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>`);
                     }
                   }
                 } else {

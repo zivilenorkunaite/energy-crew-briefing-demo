@@ -961,6 +961,72 @@ def generate_work_orders():
     final_coverage = len(crews_with_future_final) / len(all_crew_names) if all_crew_names else 1.0
     print(f"  Coverage: {final_coverage:.0%} ({len(crews_with_future_final)}/{len(all_crew_names)} crews have work in next 14 days)")
 
+    # ── Ensure the first crew has work on every weekday in the next 20 days ──
+    # This guarantees example questions like "next Tuesday" always find data
+    first_crew = all_crew_names[0] if all_crew_names else None
+    if first_crew:
+        first_crew_dates = set()
+        for wo in all_wos:
+            if wo["assigned_crew"] == first_crew:
+                try:
+                    sd = date.fromisoformat(wo["scheduled_date"]) if isinstance(wo["scheduled_date"], str) else wo["scheduled_date"]
+                    first_crew_dates.add(sd)
+                except (ValueError, TypeError):
+                    pass
+
+        crew_info = CREWS[first_crew]
+        depot = crew_info["depot"]
+        members = crew_info["members"]
+        locations = DEPOT_LOCATIONS.get(depot, [depot])
+        primary_type = crew_info["type"]
+        filled_days = 0
+
+        for day_offset in range(1, 21):
+            d = today + timedelta(days=day_offset)
+            if d.weekday() >= 5:  # skip weekends
+                continue
+            if d in first_crew_dates:
+                continue
+
+            # Add 2 WOs for this missing day
+            for _ in range(2):
+                templates = WO_TEMPLATES.get(primary_type, WO_TEMPLATES["Planned Maintenance"])
+                title_tpl, desc_tpl = random.choice(templates)
+                loc = random.choice(locations)
+                title = title_tpl.format(loc=loc)
+                wo_number = f"WO-{today.year}-{wo_id:05d}"
+                created = d - timedelta(days=random.randint(1, 5))
+
+                all_wos.append({
+                    "id": wo_id, "wo_number": wo_number,
+                    "project_id": random.randint(1, 120),
+                    "asset_id": _pick_asset_id(primary_type, depot),
+                    "title": title.replace("'", "''"), "wo_type": primary_type,
+                    "priority": random.choices(PRIORITIES, weights=PRIORITY_WEIGHTS)[0],
+                    "status": "Open", "created_date": created.isoformat(),
+                    "scheduled_date": d.isoformat(), "completed_date": None,
+                    "estimated_hours": round(random.uniform(2, 8), 1),
+                    "actual_hours": None, "assigned_crew": first_crew,
+                    "location": loc, "description": desc_tpl.replace("'", "''"),
+                })
+                for seq in range(1, 3):
+                    assigned = random.choice(members)
+                    all_tasks.append({
+                        "id": task_id, "work_order_id": wo_id,
+                        "task_number": f"T-{task_id:06d}", "sequence": seq,
+                        "task_name": f"Task {seq}", "status": "Open",
+                        "scheduled_datetime": d.isoformat(), "completed_datetime": None,
+                        "assigned_to": assigned["name"].replace("'", "''"),
+                        "estimated_hours": round(random.uniform(1, 4), 1),
+                        "actual_hours": None, "notes": None,
+                    })
+                    task_id += 1
+                wo_id += 1
+            filled_days += 1
+
+        if filled_days:
+            print(f"  Filled {filled_days} missing weekdays for {first_crew}")
+
     print(f"  Generated {len(all_wos)} work orders and {len(all_tasks)} tasks")
     return all_wos, all_tasks
 

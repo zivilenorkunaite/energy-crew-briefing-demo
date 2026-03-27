@@ -277,7 +277,7 @@ async def suggestions():
     d1 = depot_names[0] if depot_names else "Town A"
     d2 = depot_names[1] if len(depot_names) > 1 else d1
     return [
-        f"Prepare a crew briefing for {c1} tomorrow",
+        f"Prepare a crew briefing for {c1} next Tuesday",
         f"What work orders does {c3} have scheduled this week?",
         f"Prepare a briefing for {c2} for the day after tomorrow",
         "What PPE and isolation procedures are needed for overhead line replacement?",
