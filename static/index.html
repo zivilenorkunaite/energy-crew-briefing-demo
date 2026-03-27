@@ -714,6 +714,7 @@
       try {
         const res = await fetch('/api/briefing/pdf', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             response: data.response,
@@ -722,7 +723,10 @@
             briefing_date: new Date().toLocaleDateString('en-AU', {day:'numeric', month:'long', year:'numeric'}),
           }),
         });
-        if (!res.ok) throw new Error('PDF generation failed');
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          throw new Error(`PDF generation failed (${res.status}): ${errText.slice(0, 100)}`);
+        }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -763,13 +767,17 @@
       }).join('') + '</div>';
     }
 
+    function _isBriefing(sources) {
+      // A briefing has genie sources (work order data was queried)
+      return sources && sources.some(s => s.type === 'genie');
+    }
+
     function _renderAssistantMsg(text, sources, steps) {
       const div = document.createElement('div');
       div.className = 'msg assistant';
       const html = marked.parse(text || '');
-      const isBriefing = text && (text.toLowerCase().includes('crew briefing') || text.toLowerCase().includes('work summary') || text.toLowerCase().includes('work orders'));
       let downloadBtn = '';
-      if (isBriefing) {
+      if (_isBriefing(sources)) {
         const bid = 'b' + Date.now();
         _briefingData[bid] = { response: text, sources: sources || [] };
         downloadBtn = `<div style="margin-top:8px;"><button onclick="downloadBriefingPdf(this)" data-briefing-id="${bid}" style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>`;
@@ -975,8 +983,7 @@
                     if (result.sources && result.sources.length) {
                       body.insertAdjacentHTML('beforeend', _buildSourceChips(result.sources));
                     }
-                    const isBriefing = result.response && (result.response.toLowerCase().includes('crew briefing') || result.response.toLowerCase().includes('work summary'));
-                    if (isBriefing) {
+                    if (_isBriefing(result.sources)) {
                       const bid = 'b' + Date.now();
                       _briefingData[bid] = { response: result.response, sources: result.sources || [] };
                       body.insertAdjacentHTML('beforeend', `<div style="margin-top:8px;"><button onclick="downloadBriefingPdf(this)" data-briefing-id="${bid}" style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>`);
