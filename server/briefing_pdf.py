@@ -74,6 +74,10 @@ def generate_briefing_pdf(
     sources: list | None = None,
 ) -> bytes:
     """Generate a PDF from a crew briefing markdown response. Returns PDF bytes."""
+    response = _sanitize(response)
+    title = _sanitize(title)
+    crew = _sanitize(crew)
+    briefing_date = _sanitize(briefing_date)
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
@@ -253,9 +257,25 @@ def _flush_table(story, rows, cols):
     story.append(Spacer(1, 0.2*cm))
 
 
+def _sanitize(text: str) -> str:
+    """Replace unicode chars that ReportLab's default fonts can't handle."""
+    replacements = {
+        "\u2026": "...", "\u2013": "-", "\u2014": "--",
+        "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+        "\u2022": "*", "\u2002": " ", "\u2003": " ", "\u00a0": " ",
+        "\u2192": "->", "\u2190": "<-", "\u2194": "<->",
+        "\u2713": "[v]", "\u2717": "[x]", "\u2605": "*",
+        "\u26a0": "!", "\u26a0\ufe0f": "!",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    # Strip any remaining non-latin1 chars
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
 def _escape(text: str) -> str:
     """Escape HTML special chars for ReportLab Paragraph."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return _sanitize(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _strip_bold(text: str) -> str:

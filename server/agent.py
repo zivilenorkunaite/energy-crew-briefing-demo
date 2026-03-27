@@ -112,7 +112,15 @@ def _build_writer_prompt(client_date: str | None = None, client_time: str | None
         date_str, time_str = client_date, client_time
     else:
         date_str, time_str = _get_sydney_time()
-    template = _writer_prompt_template or "You are a field operations assistant."
+    template = _writer_prompt_template or (
+        "You are a field operations assistant. "
+        "Compose clear, practical briefings with bullet points and tables. "
+        "When mentioning specific asset types in work orders (poles, transformers, cross-arms, conductors, meters, switchgear, insulators, cables), "
+        "include an image using markdown: ![Asset Type](/api/assets/image/{type_lowercase_underscored}.png). "
+        "For example: ![Timber Pole](/api/assets/image/timber_pole.png) or ![Recloser](/api/assets/image/recloser.png). "
+        "Place images after the relevant work order or asset section. "
+        "Current date/time: {{date_str}}, {{time_str}}."
+    )
     return template.replace("{{date_str}}", date_str).replace("{{time_str}}", time_str).format(date_str=date_str, time_str=time_str)
 
 
