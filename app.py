@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
         _token_refresh_task = asyncio.create_task(_refresh_loop())
         print("[APP] Lakebase connected, token refresh scheduled")
     except Exception as e:
+        _startup_errors.append(f"Lakebase: {e}")
         print(f"[APP] Lakebase init failed (sessions will not persist): {e}")
 
     yield
@@ -225,6 +226,20 @@ async def health():
     if _startup_errors:
         result["startup_errors"] = _startup_errors
         result["status"] = "degraded"
+    # DB connection info (no secrets)
+    result["db"] = {
+        "pghost": bool(os.environ.get("PGHOST")),
+        "pgdatabase": os.environ.get("PGDATABASE", ""),
+        "pguser": bool(os.environ.get("PGUSER")),
+        "pgpassword": bool(os.environ.get("PGPASSWORD")),
+        "databricks_client_id": bool(os.environ.get("DATABRICKS_CLIENT_ID")),
+        "endpoint_name": os.environ.get("ENDPOINT_NAME", ""),
+    }
+    try:
+        from server.db import db
+        result["db"]["pool_active"] = db._pool is not None
+    except Exception:
+        result["db"]["pool_active"] = False
     return result
 
 

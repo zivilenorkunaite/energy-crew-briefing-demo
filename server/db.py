@@ -82,7 +82,14 @@ class DatabasePool:
 
             pg_db = os.environ.get("PGDATABASE", "databricks_postgres")
             pg_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
-            token = _generate_token()
+            # Use platform-injected PGPASSWORD, or generate via API
+            token = os.environ.get("PGPASSWORD", "")
+            if not token:
+                try:
+                    token = _generate_token()
+                except Exception as e:
+                    print(f"[DB] Token generation failed: {e}")
+                    raise RuntimeError(f"No PGPASSWORD and token generation failed: {e}")
 
             self._pool = await asyncpg.create_pool(
                 host=pg_host,

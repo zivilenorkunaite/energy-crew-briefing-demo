@@ -43,21 +43,21 @@ resources:
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
           - name: GENIE_SPACE_ID
-            value: "01f12988ab171f56b8edcdaeeaa633a0"
-          - name: PGDATABASE
-            value: databricks_postgres
-          - name: PGPORT
-            value: "5432"
+            value_from: genie-field-ops
           - name: PGHOST
             value: ep-dawn-feather-e4q3n8u1.database.australiaeast.azuredatabricks.net
+          - name: PGDATABASE
+            value: crew_briefing
+          - name: PGPORT
+            value: "5432"
           - name: PGSSLMODE
             value: require
           - name: ENDPOINT_NAME
-            value: energy-crew-briefing
+            value: "energy-crew-briefing"
           - name: MLFLOW_TRACING_DESTINATION
             value: main.energy_crew_briefing
           - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
-            value: da0168a944ff0baa
+            value_from: sql-warehouse
           - name: MLFLOW_EXPERIMENT
             value: /Shared/energy-crew-briefing-traces-uc
           - name: AGENT_VERSION
