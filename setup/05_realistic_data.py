@@ -865,131 +865,43 @@ def generate_work_orders():
                 wo_id += 1
             d += timedelta(days=1)
 
-    # ── Ensure 90%+ crew coverage in the next 2 weeks ──
-    future_start = today + timedelta(days=1)
-    future_end = today + timedelta(days=14)
-    crews_with_future = set()
-    for wo in all_wos:
-        try:
-            sd = date.fromisoformat(wo["scheduled_date"]) if isinstance(wo["scheduled_date"], str) else wo["scheduled_date"]
-            if future_start <= sd <= future_end:
-                crews_with_future.add(wo["assigned_crew"])
-        except (ValueError, TypeError):
-            pass
-
+    # ── Ensure ALL crews have work orders on every weekday for the next 20 days ──
     all_crew_names = [n for n in CREWS.keys() if CREWS[n]["depot"] != "Various"]
-    missing_crews = [n for n in all_crew_names if n not in crews_with_future]
-    target_coverage = 0.90
-    actual_coverage = len(crews_with_future) / len(all_crew_names) if all_crew_names else 1.0
 
-    if actual_coverage < target_coverage:
-        print(f"  Coverage gap: {actual_coverage:.0%} — filling {len(missing_crews)} crews with future work orders")
-        for crew_name in missing_crews:
-            crew_info = CREWS[crew_name]
-            depot = crew_info["depot"]
-            primary_type = crew_info["type"]
-            members = crew_info["members"]
-            locations = DEPOT_LOCATIONS.get(depot, [depot])
-
-            # Add 2-4 work orders in the next 2 weeks for this crew
-            n_fill = random.randint(2, 4)
-            for _ in range(n_fill):
-                d = future_start + timedelta(days=random.randint(0, 13))
-                if not is_workday(d):
-                    d += timedelta(days=1)
-                    if not is_workday(d):
-                        d += timedelta(days=1)
-
-                wo_type = primary_type
-                templates = WO_TEMPLATES.get(wo_type, WO_TEMPLATES["Planned Maintenance"])
-                title_tpl, desc_tpl = random.choice(templates)
-                loc = random.choice(locations)
-                title = title_tpl.format(loc=loc)
-
-                wo_number = f"WO-{today.year}-{wo_id:05d}"
-                created = d - timedelta(days=random.randint(1, 7))
-
-                all_wos.append({
-                    "id": wo_id,
-                    "wo_number": wo_number,
-                    "project_id": random.randint(1, 120),
-                    "asset_id": _pick_asset_id(wo_type, depot),
-                    "title": title.replace("'", "''"),
-                    "wo_type": wo_type,
-                    "priority": random.choices(PRIORITIES, weights=PRIORITY_WEIGHTS)[0],
-                    "status": "Open",
-                    "created_date": created.isoformat(),
-                    "scheduled_date": d.isoformat(),
-                    "completed_date": None,
-                    "estimated_hours": round(random.uniform(2, 8), 1),
-                    "actual_hours": None,
-                    "assigned_crew": crew_name,
-                    "location": loc,
-                    "description": desc_tpl.replace("'", "''"),
-                })
-
-                # Add 2-3 tasks per WO
-                n_tasks = random.randint(2, 3)
-                for seq in range(1, n_tasks + 1):
-                    assigned = random.choice(members)
-                    all_tasks.append({
-                        "id": task_id,
-                        "work_order_id": wo_id,
-                        "task_number": f"T-{task_id:06d}",
-                        "sequence": seq,
-                        "task_name": f"Task {seq}",
-                        "status": "Open",
-                        "scheduled_datetime": d.isoformat(),
-                        "completed_datetime": None,
-                        "assigned_to": assigned["name"].replace("'", "''"),
-                        "estimated_hours": round(random.uniform(1, 4), 1),
-                        "actual_hours": None,
-                        "notes": None,
-                    })
-                    task_id += 1
-                wo_id += 1
-
-    # Final coverage check
-    crews_with_future_final = set()
+    # Build index: crew -> set of dates with WOs
+    crew_dates = {cn: set() for cn in all_crew_names}
     for wo in all_wos:
-        try:
-            sd = date.fromisoformat(wo["scheduled_date"]) if isinstance(wo["scheduled_date"], str) else wo["scheduled_date"]
-            if future_start <= sd <= future_end:
-                crews_with_future_final.add(wo["assigned_crew"])
-        except (ValueError, TypeError):
-            pass
-    final_coverage = len(crews_with_future_final) / len(all_crew_names) if all_crew_names else 1.0
-    print(f"  Coverage: {final_coverage:.0%} ({len(crews_with_future_final)}/{len(all_crew_names)} crews have work in next 14 days)")
+        cn = wo["assigned_crew"]
+        if cn in crew_dates:
+            try:
+                sd = date.fromisoformat(wo["scheduled_date"]) if isinstance(wo["scheduled_date"], str) else wo["scheduled_date"]
+                crew_dates[cn].add(sd)
+            except (ValueError, TypeError):
+                pass
 
-    # ── Ensure the first crew has work on every weekday in the next 20 days ──
-    # This guarantees example questions like "next Tuesday" always find data
-    first_crew = all_crew_names[0] if all_crew_names else None
-    if first_crew:
-        first_crew_dates = set()
-        for wo in all_wos:
-            if wo["assigned_crew"] == first_crew:
-                try:
-                    sd = date.fromisoformat(wo["scheduled_date"]) if isinstance(wo["scheduled_date"], str) else wo["scheduled_date"]
-                    first_crew_dates.add(sd)
-                except (ValueError, TypeError):
-                    pass
+    # Collect all future weekdays
+    future_weekdays = []
+    for day_offset in range(1, 21):
+        d = today + timedelta(days=day_offset)
+        if d.weekday() < 5 and d not in PUBLIC_HOLIDAYS:
+            future_weekdays.append(d)
 
-        crew_info = CREWS[first_crew]
+    total_filled = 0
+    for crew_name in all_crew_names:
+        crew_info = CREWS[crew_name]
         depot = crew_info["depot"]
         members = crew_info["members"]
         locations = DEPOT_LOCATIONS.get(depot, [depot])
         primary_type = crew_info["type"]
-        filled_days = 0
+        existing_dates = crew_dates[crew_name]
 
-        for day_offset in range(1, 21):
-            d = today + timedelta(days=day_offset)
-            if d.weekday() >= 5:  # skip weekends
-                continue
-            if d in first_crew_dates:
+        for d in future_weekdays:
+            if d in existing_dates:
                 continue
 
-            # Add 2 WOs for this missing day
-            for _ in range(2):
+            # Add 1-2 WOs for this missing day
+            n_fill = random.randint(1, 2)
+            for _ in range(n_fill):
                 templates = WO_TEMPLATES.get(primary_type, WO_TEMPLATES["Planned Maintenance"])
                 title_tpl, desc_tpl = random.choice(templates)
                 loc = random.choice(locations)
@@ -1006,7 +918,7 @@ def generate_work_orders():
                     "status": "Open", "created_date": created.isoformat(),
                     "scheduled_date": d.isoformat(), "completed_date": None,
                     "estimated_hours": round(random.uniform(2, 8), 1),
-                    "actual_hours": None, "assigned_crew": first_crew,
+                    "actual_hours": None, "assigned_crew": crew_name,
                     "location": loc, "description": desc_tpl.replace("'", "''"),
                 })
                 for seq in range(1, 3):
@@ -1022,10 +934,9 @@ def generate_work_orders():
                     })
                     task_id += 1
                 wo_id += 1
-            filled_days += 1
+            total_filled += 1
 
-        if filled_days:
-            print(f"  Filled {filled_days} missing weekdays for {first_crew}")
+    print(f"  Filled {total_filled} crew-day gaps across {len(all_crew_names)} crews x {len(future_weekdays)} weekdays")
 
     print(f"  Generated {len(all_wos)} work orders and {len(all_tasks)} tasks")
     return all_wos, all_tasks
