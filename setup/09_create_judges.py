@@ -126,12 +126,12 @@ print("Created: grounding")
 
 sample_data = [
     {
-        "inputs": {"question": "Prepare a crew briefing for Grafton Lines A on Tuesday 25 March"},
+        "inputs": {"question": "Prepare a crew briefing for Townsville Lines A on Tuesday 25 March"},
         "expectations": {
             "guidelines": [
                 "Must include work orders from Genie",
                 "Must include SWMS safety requirements with document citations",
-                "Must include weather forecast for Grafton",
+                "Must include weather forecast for Townsville",
                 "Must include local notices check",
                 "Must be structured with clear sections",
             ]

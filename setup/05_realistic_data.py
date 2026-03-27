@@ -25,11 +25,10 @@ PUBLIC_HOLIDAYS = EASTER_DATES | {
 
 random.seed(42)  # reproducible
 
-# ── Realistic depot-based crews ──
+# ── Realistic depot-based crews (Queensland) ──
 CREWS = {
-    # Depot: Grafton (Coastal region)
-    "Grafton Lines A": {
-        "depot": "Grafton", "type": "Planned Maintenance",
+    "Townsville Lines A": {
+        "depot": "Townsville", "type": "Planned Maintenance",
         "members": [
             {"name": "Greg Thompson", "role": "Crew Leader"},
             {"name": "Shane Murray", "role": "Powerline Worker"},
@@ -37,17 +36,17 @@ CREWS = {
             {"name": "Lachlan Mitchell", "role": "Apprentice"},
         ],
     },
-    "Grafton Lines B": {
-        "depot": "Grafton", "type": "Corrective Maintenance",
+    "Townsville Lines B": {
+        "depot": "Townsville", "type": "Corrective Maintenance",
         "members": [
             {"name": "Darren Walsh", "role": "Crew Leader"},
             {"name": "Matt Sullivan", "role": "Powerline Worker"},
             {"name": "Cooper Ryan", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Coffs Harbour (Coastal)
-    "Coffs Harbour Lines": {
-        "depot": "Coffs Harbour", "type": "Planned Maintenance",
+    # Depot: Cairns (North Queensland)
+    "Cairns Lines": {
+        "depot": "Cairns", "type": "Planned Maintenance",
         "members": [
             {"name": "Craig Williams", "role": "Crew Leader"},
             {"name": "Jason Kelly", "role": "Powerline Worker"},
@@ -55,25 +54,25 @@ CREWS = {
             {"name": "Jack Anderson", "role": "Apprentice"},
         ],
     },
-    "Coffs Harbour Cable": {
-        "depot": "Coffs Harbour", "type": "Capital Works",
+    "Cairns Cable": {
+        "depot": "Cairns", "type": "Capital Works",
         "members": [
             {"name": "Adam Stewart", "role": "Senior Cable Jointer"},
             {"name": "Nathan Chen", "role": "Cable Jointer"},
         ],
     },
-    # Depot: Lismore (Coastal)
-    "Lismore Lines": {
-        "depot": "Lismore", "type": "Corrective Maintenance",
+    # Depot: Innisfail (North Queensland)
+    "Innisfail Lines": {
+        "depot": "Innisfail", "type": "Corrective Maintenance",
         "members": [
             {"name": "Wayne Campbell", "role": "Crew Leader"},
             {"name": "Josh Henderson", "role": "Powerline Worker"},
             {"name": "Ethan Taylor", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Port Macquarie (Mid North Coast)
-    "Port Macquarie Lines": {
-        "depot": "Port Macquarie", "type": "Planned Maintenance",
+    # Depot: Mackay (North Queensland)
+    "Mackay Lines": {
+        "depot": "Mackay", "type": "Planned Maintenance",
         "members": [
             {"name": "Brett Robertson", "role": "Crew Leader"},
             {"name": "Chris Johnson", "role": "Powerline Worker"},
@@ -81,42 +80,42 @@ CREWS = {
             {"name": "Bailey Smith", "role": "Apprentice"},
         ],
     },
-    # Depot: Tamworth (Northern)
-    "Tamworth Lines": {
-        "depot": "Tamworth", "type": "Planned Maintenance",
+    # Depot: Rockhampton (Northern)
+    "Rockhampton Lines": {
+        "depot": "Rockhampton", "type": "Planned Maintenance",
         "members": [
             {"name": "Mick Anderson", "role": "Crew Leader"},
             {"name": "Luke Campbell", "role": "Powerline Worker"},
             {"name": "Ryan Singh", "role": "Powerline Worker"},
         ],
     },
-    "Tamworth Substation": {
-        "depot": "Tamworth", "type": "Capital Works",
+    "Rockhampton Substation": {
+        "depot": "Rockhampton", "type": "Capital Works",
         "members": [
             {"name": "Andrew McPherson", "role": "Senior Electrical Tech"},
             {"name": "Noah Williams", "role": "Electrical Tech"},
         ],
     },
-    # Depot: Armidale (Northern Tablelands)
-    "Armidale Lines": {
-        "depot": "Armidale", "type": "Planned Maintenance",
+    # Depot: Bundaberg (Northern Tablelands)
+    "Bundaberg Lines": {
+        "depot": "Bundaberg", "type": "Planned Maintenance",
         "members": [
             {"name": "Col Stewart", "role": "Crew Leader"},
             {"name": "Liam Brown", "role": "Powerline Worker"},
             {"name": "Will Thompson", "role": "Powerline Worker"},
         ],
     },
-    "Armidale Inspection": {
-        "depot": "Armidale", "type": "Inspection",
+    "Bundaberg Inspection": {
+        "depot": "Bundaberg", "type": "Inspection",
         "members": [
             {"name": "Sarah Mitchell", "role": "Senior Inspector"},
             {"name": "Emma Walsh", "role": "Asset Inspector"},
             {"name": "Brooke Nguyen", "role": "Asset Inspector"},
         ],
     },
-    # Depot: Orange (Western/Ranges)
-    "Orange Lines": {
-        "depot": "Orange", "type": "Planned Maintenance",
+    # Depot: Toowoomba (Western/Ranges)
+    "Toowoomba Lines": {
+        "depot": "Toowoomba", "type": "Planned Maintenance",
         "members": [
             {"name": "Gary Wilson", "role": "Crew Leader"},
             {"name": "Kevin Murray", "role": "Powerline Worker"},
@@ -124,41 +123,41 @@ CREWS = {
             {"name": "Jack Sullivan", "role": "Apprentice"},
         ],
     },
-    "Orange Cable": {
-        "depot": "Orange", "type": "Capital Works",
+    "Toowoomba Cable": {
+        "depot": "Toowoomba", "type": "Capital Works",
         "members": [
             {"name": "Nicole Henderson", "role": "Senior Cable Jointer"},
             {"name": "Matt Robertson", "role": "Cable Jointer"},
         ],
     },
-    # Depot: Dubbo (Western/Macquarie)
-    "Dubbo Lines": {
-        "depot": "Dubbo", "type": "Planned Maintenance",
+    # Depot: Roma (Western/Macquarie)
+    "Roma Lines": {
+        "depot": "Roma", "type": "Planned Maintenance",
         "members": [
             {"name": "Shane Taylor", "role": "Crew Leader"},
             {"name": "Ben Williams", "role": "Powerline Worker"},
             {"name": "Cooper Johnson", "role": "Powerline Worker"},
         ],
     },
-    "Dubbo Emergency": {
-        "depot": "Dubbo", "type": "Emergency Response",
+    "Roma Emergency": {
+        "depot": "Roma", "type": "Emergency Response",
         "members": [
             {"name": "Darren Brown", "role": "Crew Leader"},
             {"name": "Ryan Kelly", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Bathurst (Ranges)
-    "Bathurst Lines": {
-        "depot": "Bathurst", "type": "Planned Maintenance",
+    # Depot: Emerald (Ranges)
+    "Emerald Lines": {
+        "depot": "Emerald", "type": "Planned Maintenance",
         "members": [
             {"name": "Craig Anderson", "role": "Crew Leader"},
             {"name": "Jason Thompson", "role": "Powerline Worker"},
             {"name": "Riley Mitchell", "role": "Apprentice"},
         ],
     },
-    # Depot: Wagga Wagga (Riverina)
-    "Wagga Wagga Lines": {
-        "depot": "Wagga Wagga", "type": "Planned Maintenance",
+    # Depot: Mount Isa (North Queensland Queensland)
+    "Mount Isa Lines": {
+        "depot": "Mount Isa", "type": "Planned Maintenance",
         "members": [
             {"name": "Adam Walsh", "role": "Crew Leader"},
             {"name": "Nathan Murray", "role": "Powerline Worker"},
@@ -166,48 +165,48 @@ CREWS = {
             {"name": "Lachlan Wilson", "role": "Apprentice"},
         ],
     },
-    "Wagga Wagga Inspection": {
-        "depot": "Wagga Wagga", "type": "Inspection",
+    "Mount Isa Inspection": {
+        "depot": "Mount Isa", "type": "Inspection",
         "members": [
             {"name": "Kylie Robertson", "role": "Senior Inspector"},
             {"name": "Tegan Campbell", "role": "Asset Inspector"},
         ],
     },
-    # Depot: Broken Hill (Far West)
-    "Broken Hill Lines": {
-        "depot": "Broken Hill", "type": "Planned Maintenance",
+    # Depot: Longreach (Central West Queensland)
+    "Longreach Lines": {
+        "depot": "Longreach", "type": "Planned Maintenance",
         "members": [
             {"name": "Mick O'Brien", "role": "Crew Leader"},
             {"name": "Luke Henderson", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Moree (North Western)
-    "Moree Lines": {
-        "depot": "Moree", "type": "Planned Maintenance",
+    # Depot: Charters Towers (North Queensland)
+    "Charters Towers Lines": {
+        "depot": "Charters Towers", "type": "Planned Maintenance",
         "members": [
             {"name": "Brett Singh", "role": "Crew Leader"},
             {"name": "Chris Sullivan", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Mudgee (Macquarie)
-    "Mudgee Lines": {
-        "depot": "Mudgee", "type": "Corrective Maintenance",
+    # Depot: Atherton (Tablelands)
+    "Atherton Lines": {
+        "depot": "Atherton", "type": "Corrective Maintenance",
         "members": [
             {"name": "Wayne Anderson", "role": "Crew Leader"},
             {"name": "Josh Murray", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Inverell (Northern Tablelands)
-    "Inverell Lines": {
-        "depot": "Inverell", "type": "Planned Maintenance",
+    # Depot: Gympie (Wide Bay)
+    "Gympie Lines": {
+        "depot": "Gympie", "type": "Planned Maintenance",
         "members": [
             {"name": "Kevin Brown", "role": "Crew Leader"},
             {"name": "Thomas Kelly", "role": "Powerline Worker"},
         ],
     },
-    # Depot: Queanbeyan (South Eastern)
-    "Queanbeyan Lines": {
-        "depot": "Queanbeyan", "type": "Planned Maintenance",
+    # Depot: Gladstone (Central Queensland)
+    "Gladstone Lines": {
+        "depot": "Gladstone", "type": "Planned Maintenance",
         "members": [
             {"name": "Gary Thompson", "role": "Crew Leader"},
             {"name": "Matt Campbell", "role": "Powerline Worker"},
@@ -357,22 +356,22 @@ STREET_NAMES = [
 
 # Locations per depot for work order titles
 DEPOT_LOCATIONS = {
-    "Grafton": ["Grafton", "South Grafton", "Junction Hill", "Ulmarra", "Maclean", "Yamba"],
-    "Coffs Harbour": ["Coffs Harbour", "Sawtell", "Toormina", "Woolgoolga", "Bellingen"],
-    "Lismore": ["Lismore", "Goonellabah", "Ballina", "Byron Bay", "Alstonville"],
-    "Port Macquarie": ["Port Macquarie", "Wauchope", "Laurieton", "Kempsey", "Nambucca Heads"],
-    "Tamworth": ["Tamworth", "Gunnedah", "Quirindi", "Werris Creek", "Manilla"],
-    "Armidale": ["Armidale", "Uralla", "Walcha", "Guyra", "Dorrigo"],
-    "Orange": ["Orange", "Blayney", "Millthorpe", "Molong", "Canowindra"],
-    "Dubbo": ["Dubbo", "Wellington", "Narromine", "Peak Hill", "Gilgandra"],
-    "Bathurst": ["Bathurst", "Kelso", "Raglan", "Sofala", "Portland"],
-    "Wagga Wagga": ["Wagga Wagga", "Junee", "Cootamundra", "Temora", "Tumut"],
-    "Broken Hill": ["Broken Hill", "Menindee", "Silverton", "Wilcannia"],
-    "Moree": ["Moree", "Narrabri", "Wee Waa", "Boggabri"],
-    "Mudgee": ["Mudgee", "Gulgong", "Kandos", "Rylstone"],
-    "Inverell": ["Inverell", "Ashford", "Bundarra", "Tingha"],
-    "Queanbeyan": ["Queanbeyan", "Bungendore", "Braidwood", "Yass", "Cooma"],
-    "Various": ["Grafton", "Coffs Harbour", "Tamworth", "Orange", "Dubbo", "Wagga Wagga"],
+    "Townsville": ["Townsville", "Aitkenvale", "Kirwan", "Thuringowa", "Magnetic Island", "Ingham"],
+    "Cairns": ["Cairns", "Smithfield", "Edmonton", "Gordonvale", "Mareeba", "Port Douglas"],
+    "Mackay": ["Mackay", "Sarina", "Walkerston", "Marian", "Mirani", "Proserpine"],
+    "Rockhampton": ["Rockhampton", "Yeppoon", "Gracemere", "Mount Morgan", "Emu Park"],
+    "Bundaberg": ["Bundaberg", "Bargara", "Childers", "Gin Gin", "Burnett Heads"],
+    "Gladstone": ["Gladstone", "Tannum Sands", "Calliope", "Boyne Island"],
+    "Toowoomba": ["Toowoomba", "Highfields", "Oakey", "Pittsworth", "Dalby"],
+    "Roma": ["Roma", "Mitchell", "Surat", "St George", "Charleville"],
+    "Emerald": ["Emerald", "Blackwater", "Springsure", "Clermont", "Capella"],
+    "Mount Isa": ["Mount Isa", "Cloncurry", "Julia Creek", "Camooweal"],
+    "Longreach": ["Longreach", "Barcaldine", "Blackall", "Winton"],
+    "Innisfail": ["Innisfail", "Tully", "Mission Beach", "Babinda", "Mourilyan"],
+    "Charters Towers": ["Charters Towers", "Mingela", "Ravenswood", "Pentland"],
+    "Atherton": ["Atherton", "Malanda", "Herberton", "Ravenshoe", "Yungaburra"],
+    "Gympie": ["Gympie", "Tin Can Bay", "Rainbow Beach", "Kilkivan"],
+    "Various": ["Townsville", "Cairns", "Mackay", "Rockhampton", "Bundaberg", "Toowoomba"],
 }
 
 

@@ -68,50 +68,50 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
     """Search for local council notices, community events, and road closures near a work area.
 
     Args:
-        location: Town, suburb, or depot area (e.g. "Grafton", "Coffs Harbour")
+        location: Town, suburb, or depot area (e.g. "Townsville", "Cairns")
         search_type: One of "road_works", "community_events", "all"
 
     Returns:
         Formatted string of search results.
     """
     loc, council_domain, lga = _resolve_location(location)
-    town = loc.replace(" NSW", "")
-    town_nsw = f"{town} NSW"
+    town = loc.replace(f" {STATE_SHORT}", "")
+    town_state = f"{town} {STATE_SHORT}"
 
     searches = []
 
     if search_type in ("road_works", "all"):
         council_domains = [council_domain] if council_domain else []
         searches.append({
-            "query": f"road closure road works {town_nsw}",
+            "query": f"road closure road works {town_state}",
             "domains": council_domains,
         })
         searches.append({
-            "query": f"{town_nsw} road closure traffic disruption",
-            "domains": ["livetraffic.com", "transport.nsw.gov.au"],
+            "query": f"{town_state} road closure traffic disruption",
+            "domains": [d for d in WEB_SEARCH_DOMAINS if "traffic" in d or "transport" in d or "tmr" in d],
         })
 
     if search_type in ("community_events", "all"):
         event_domains = [council_domain] if council_domain else []
         event_domains.append("eventbrite.com.au")
         searches.append({
-            "query": f"{town_nsw} community event festival market fair 2026",
+            "query": f"{town_state} community event festival market fair 2026",
             "domains": event_domains,
         })
 
     if search_type == "all":
         searches.append({
-            "query": f"{town_nsw} planned outage power disruption {COMPANY_NAME}",
+            "query": f"{town_state} planned outage power disruption {COMPANY_NAME}",
             "domains": [COMPANY_DOMAIN],
         })
 
     all_results = []
-    nsw_keywords = [
-        town.lower(), "nsw", "council", "road", "closure", "traffic", "event",
+    relevance_keywords = [
+        town.lower(), STATE_SHORT.lower(), "council", "road", "closure", "traffic", "event",
         "festival", "market", "outage", "disruption", "works",
     ]
     if lga:
-        nsw_keywords.append(lga.lower())
+        relevance_keywords.append(lga.lower())
 
     for search in searches:
         results = await _mcp_search(
@@ -146,9 +146,10 @@ async def search_local_notices(location: str, search_type: str = "all") -> str:
         fallback.append("**Check these sources directly:**")
         if council_domain:
             fallback.append(f"- {lga} Council: https://{council_domain}")
-        fallback.append("- Live Traffic NSW: https://www.livetraffic.com")
+        for domain in WEB_SEARCH_DOMAINS:
+            if COMPANY_DOMAIN not in domain:
+                fallback.append(f"- https://{domain}")
         fallback.append(f"- {COMPANY_NAME} outages: {COMPANY_OUTAGE_URL}")
-        fallback.append("- NSW SES: https://www.ses.nsw.gov.au")
         return "\n".join(fallback)
 
     # Deduplicate by URL, sort by relevance

@@ -13,27 +13,27 @@ import urllib.request
 
 TABLE = "main.energy_crew_briefing.bom_weather"
 
-# Depot locations
+# Depot locations (Queensland)
 STATIONS = [
-    {"name": "Grafton",         "lat": -29.69, "lon": 152.93},
-    {"name": "Coffs Harbour",   "lat": -30.30, "lon": 153.11},
-    {"name": "Tamworth",        "lat": -31.09, "lon": 150.93},
-    {"name": "Orange",          "lat": -33.28, "lon": 149.10},
-    {"name": "Dubbo",           "lat": -32.25, "lon": 148.60},
-    {"name": "Wagga Wagga",     "lat": -35.12, "lon": 147.37},
-    {"name": "Armidale",        "lat": -30.51, "lon": 151.67},
-    {"name": "Port Macquarie",  "lat": -31.43, "lon": 152.91},
-    {"name": "Bathurst",        "lat": -33.42, "lon": 149.58},
-    {"name": "Broken Hill",     "lat": -31.95, "lon": 141.47},
-    {"name": "Lismore",         "lat": -28.81, "lon": 153.28},
-    {"name": "Casino",          "lat": -28.87, "lon": 153.05},
-    {"name": "Glen Innes",      "lat": -29.73, "lon": 151.74},
-    {"name": "Inverell",        "lat": -29.78, "lon": 151.11},
-    {"name": "Mudgee",          "lat": -32.59, "lon": 149.59},
-    {"name": "Moree",           "lat": -29.46, "lon": 149.85},
-    {"name": "Lightning Ridge", "lat": -29.43, "lon": 147.98},
-    {"name": "Queanbeyan",      "lat": -35.35, "lon": 149.23},
-    {"name": "Bega",            "lat": -36.67, "lon": 149.84},
+    {"name": "Townsville",      "lat": -19.25, "lon": 146.80},
+    {"name": "Cairns",          "lat": -16.92, "lon": 145.77},
+    {"name": "Mackay",          "lat": -21.14, "lon": 149.19},
+    {"name": "Rockhampton",     "lat": -23.38, "lon": 150.51},
+    {"name": "Bundaberg",       "lat": -24.87, "lon": 152.35},
+    {"name": "Gladstone",       "lat": -23.85, "lon": 151.27},
+    {"name": "Maryborough",     "lat": -25.53, "lon": 152.70},
+    {"name": "Toowoomba",       "lat": -27.56, "lon": 151.95},
+    {"name": "Roma",            "lat": -26.57, "lon": 148.79},
+    {"name": "Emerald",         "lat": -23.53, "lon": 148.16},
+    {"name": "Mount Isa",       "lat": -20.73, "lon": 139.49},
+    {"name": "Longreach",       "lat": -23.44, "lon": 144.25},
+    {"name": "Gympie",          "lat": -26.19, "lon": 152.67},
+    {"name": "Innisfail",       "lat": -17.52, "lon": 146.03},
+    {"name": "Bowen",           "lat": -20.01, "lon": 148.24},
+    {"name": "Charters Towers", "lat": -20.08, "lon": 146.26},
+    {"name": "Atherton",        "lat": -17.27, "lon": 145.48},
+    {"name": "Ayr",             "lat": -19.57, "lon": 147.40},
+    {"name": "Biloela",         "lat": -24.40, "lon": 150.51},
 ]
 
 WMO_CODES = {

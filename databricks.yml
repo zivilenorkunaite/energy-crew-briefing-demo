@@ -43,7 +43,7 @@ resources:
           - name: TAVILY_API_KEY
             value_from: tavily-api-key
           - name: GENIE_SPACE_ID
-            value: "placeholder-create-genie-room"
+            value: "01f12970ca7c1abf86a82c4b0348ca08"
           - name: PGDATABASE
             value: databricks_postgres
           - name: PGPORT

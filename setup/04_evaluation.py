@@ -40,7 +40,7 @@ eval_data = pd.DataFrame([
         "category": "genie",
     },
     {
-        "question": "What's the weather like in Grafton today?",
+        "question": "What's the weather like in Townsville today?",
         "expected_tools": "query_weather",
         "expected_sections": "temperature,wind,humidity",
         "category": "weather",
@@ -52,7 +52,7 @@ eval_data = pd.DataFrame([
         "category": "swms",
     },
     {
-        "question": "Are there any road closures near Coffs Harbour?",
+        "question": "Are there any road closures near Cairns?",
         "expected_tools": "search_local_notices",
         "expected_sections": "road,closure",
         "category": "web",
@@ -64,13 +64,13 @@ eval_data = pd.DataFrame([
         "category": "genie",
     },
     {
-        "question": "Prepare a vegetation management safety briefing for the Lismore area",
+        "question": "Prepare a vegetation management safety briefing for the Innisfail area",
         "expected_tools": "get_swms,query_genie,search_local_notices",
         "expected_sections": "Vegetation Management,Safety,Local Notices",
         "category": "briefing",
     },
     {
-        "question": "What's the wind speed in Dubbo? Is it safe for elevated work?",
+        "question": "What's the wind speed in Roma? Is it safe for elevated work?",
         "expected_tools": "query_weather,get_swms",
         "expected_sections": "wind,safety",
         "category": "weather",

@@ -16,21 +16,10 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 from helpers import run_cli, run_sql, get_app_sp_id, UC_FULL, UC_CATALOG, UC_SCHEMA
 
-TABLE = f"{UC_FULL}.bom_weather"
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from server.branding import BOM_STATIONS as STATIONS
 
-# BOM weather stations for depot service area
-STATIONS = {
-    "Grafton": {"wmo_id": 94791, "product": "IDN60901"},
-    "Coffs Harbour": {"wmo_id": 59040, "product": "IDN60901"},
-    "Tamworth": {"wmo_id": 94776, "product": "IDN60901"},
-    "Orange": {"wmo_id": 94753, "product": "IDN60901"},
-    "Dubbo": {"wmo_id": 95719, "product": "IDN60901"},
-    "Wagga Wagga": {"wmo_id": 94749, "product": "IDN60901"},
-    "Armidale": {"wmo_id": 94774, "product": "IDN60901"},
-    "Port Macquarie": {"wmo_id": 94786, "product": "IDN60901"},
-    "Bathurst": {"wmo_id": 94729, "product": "IDN60901"},
-    "Broken Hill": {"wmo_id": 94689, "product": "IDN60901"},
-}
+TABLE = f"{UC_FULL}.bom_weather"
 
 
 def step1_create_table():
@@ -101,19 +90,22 @@ def step2_seed_data():
     if not all_rows:
         print("  No observations fetched. Seeding with placeholder data...")
         # Insert placeholder so the table isn't empty
+        # Generate placeholder rows from configured stations
+        import random
+        random.seed(42)
+        placeholders = []
+        conditions = ["Partly cloudy", "Mostly sunny", "Clear", "Overcast", "Fine", "Sunny"]
+        directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        for name, info in STATIONS.items():
+            t = round(random.uniform(18, 32), 1)
+            h = random.randint(40, 80)
+            w = round(random.uniform(5, 25), 1)
+            d = random.choice(directions)
+            c = random.choice(conditions)
+            placeholders.append(f"('{name}', {info['wmo_id']}, {t}, {h}, {w}, '{d}', '{c}')")
         run_sql(f"""
             INSERT INTO {TABLE} (station_name, wmo_id, temperature, humidity, wind_speed_kmh, wind_direction, weather_description)
-            VALUES
-            ('Grafton', 94791, 22.5, 65, 15.0, 'NE', 'Partly cloudy'),
-            ('Coffs Harbour', 59040, 24.0, 70, 12.0, 'E', 'Mostly sunny'),
-            ('Tamworth', 94776, 19.0, 55, 20.0, 'W', 'Clear'),
-            ('Orange', 94753, 15.0, 60, 18.0, 'SW', 'Overcast'),
-            ('Dubbo', 95719, 21.0, 45, 22.0, 'NW', 'Sunny'),
-            ('Wagga Wagga', 94749, 18.0, 50, 16.0, 'S', 'Clear'),
-            ('Armidale', 94774, 14.0, 70, 10.0, 'SE', 'Fog patches'),
-            ('Port Macquarie', 94786, 23.0, 75, 8.0, 'NE', 'Fine'),
-            ('Bathurst', 94729, 13.0, 65, 14.0, 'W', 'Partly cloudy'),
-            ('Broken Hill', 94689, 26.0, 30, 25.0, 'N', 'Hot and dry')
+            VALUES {', '.join(placeholders)}
         """)
         return
 

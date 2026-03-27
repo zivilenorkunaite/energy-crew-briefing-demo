@@ -173,7 +173,7 @@ TOOLS = [
                         "type": "string",
                         "description": (
                             "Town, suburb, or depot area. "
-                            "Examples: 'Grafton', 'Coffs Harbour', 'Orange', 'Dubbo'"
+                            "Examples: 'Townsville', 'Cairns', 'Mackay', 'Rockhampton'"
                         ),
                     },
                     "date": {
@@ -205,7 +205,7 @@ TOOLS = [
                         "type": "string",
                         "description": (
                             "Town, suburb, or depot area to search near. "
-                            "Examples: 'Grafton', 'Coffs Harbour', 'Orange', 'Tamworth'"
+                            "Examples: 'Townsville', 'Cairns', 'Toowoomba', 'Rockhampton'"
                         ),
                     },
                     "search_type": {
