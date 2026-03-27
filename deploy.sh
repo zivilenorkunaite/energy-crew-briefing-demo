@@ -109,10 +109,10 @@ cd "$SCRIPT_DIR"
 databricks bundle deploy --profile "$PROFILE"
 echo "Bundle deployed"
 
-# ── Postgres resource (not supported in DABs) ─────────────────────────
+# ── App resources + UC grants (Lakebase, Genie, Warehouse — not in DABs) ──
 echo ""
-echo "Adding Lakebase postgres resource..."
-python3 "$SCRIPT_DIR/setup/13_postgres_resource.py"
+echo "Adding app resources + UC grants..."
+python3 "$SCRIPT_DIR/setup/13_app_resources.py"
 
 # ── App deploy (restart with new code) ────────────────────────────────
 echo ""
