@@ -649,6 +649,46 @@ def generate_asset_images():
 
     print(f"  Generated {len(ASSET_TYPES)} placeholder images in {img_dir}/")
 
+    # Create UC Volume and upload images
+    print("  Creating UC Volume for asset images...")
+    run_sql(f"CREATE VOLUME IF NOT EXISTS {UC_FULL}.asset_images")
+
+    print("  Uploading images to UC Volume...")
+    from helpers import get_host, PROFILE
+    import urllib.request
+
+    try:
+        from databricks.sdk import WorkspaceClient
+        w = WorkspaceClient(profile=PROFILE)
+        host = w.config.host
+        token = w.config.token or w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
+    except Exception as e:
+        print(f"  Could not get auth for upload: {e}")
+        return
+
+    uploaded = 0
+    for filename in os.listdir(img_dir):
+        if not filename.endswith(".png"):
+            continue
+        filepath = os.path.join(img_dir, filename)
+        volume_path = f"/Volumes/{UC_FULL.replace('.', '/')}/asset_images/{filename}"
+        url = f"{host}/api/2.0/fs/files{volume_path}?overwrite=true"
+
+        with open(filepath, "rb") as f:
+            data = f.read()
+
+        req = urllib.request.Request(
+            url, data=data, method="PUT",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=15)
+            uploaded += 1
+        except Exception as e:
+            print(f"  Upload failed for {filename}: {e}")
+
+    print(f"  Uploaded {uploaded}/{len(ASSET_TYPES)} images to UC Volume")
+
 
 def generate_work_orders():
     """Generate work orders: 30 days history + 20 days forward from today."""

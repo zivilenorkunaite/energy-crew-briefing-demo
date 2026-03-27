@@ -288,6 +288,71 @@ async def suggestions():
     ]
 
 
+# ── Briefing PDF download ─────────────────────────────────────────────────
+
+class BriefingPdfRequest(BaseModel):
+    response: str
+    title: str = "Crew Briefing"
+    crew: str = ""
+    briefing_date: str = ""
+    sources: list = []
+
+
+@app.post("/api/briefing/pdf")
+async def briefing_pdf(req: BriefingPdfRequest):
+    """Generate a PDF from a crew briefing response."""
+    try:
+        from server.briefing_pdf import generate_briefing_pdf
+        pdf_bytes = generate_briefing_pdf(
+            response=req.response,
+            title=req.title,
+            crew=req.crew,
+            briefing_date=req.briefing_date,
+            sources=req.sources,
+        )
+        filename = f"briefing_{req.crew.replace(' ', '_')}_{req.briefing_date.replace(' ', '_')}.pdf" if req.crew else "briefing.pdf"
+        from starlette.responses import Response
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── Asset image proxy ─────────────────────────────────────────────────────
+
+@app.get("/api/assets/image/{filename}")
+async def asset_image(filename: str):
+    """Proxy asset images from UC Volume."""
+    import re
+    import aiohttp
+    from server.config import get_oauth_token, get_workspace_host
+    from server.customise import UC_FULL
+
+    if not re.match(r'^[a-z0-9_\-]+\.png$', filename):
+        return JSONResponse(status_code=400, content={"error": "Invalid filename"})
+
+    host = get_workspace_host()
+    token = get_oauth_token()
+    volume_path = f"/Volumes/{UC_FULL.replace('.', '/')}/asset_images/{filename}"
+    url = f"{host}/api/2.0/fs/files{volume_path}"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return JSONResponse(status_code=404, content={"error": "Image not found"})
+                data = await resp.read()
+                from starlette.responses import Response
+                return Response(content=data, media_type="image/png")
+    except Exception:
+        return JSONResponse(status_code=500, content={"error": "Failed to fetch image"})
+
+
 # ── Cache endpoints ───────────────────────────────────────────────────────
 
 @app.get("/api/cache/stats")

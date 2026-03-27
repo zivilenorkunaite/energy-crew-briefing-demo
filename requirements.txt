@@ -2,7 +2,6 @@ fastapi
 uvicorn
 aiohttp
 databricks-sdk
-databricks-mcp
-mcp
 asyncpg
 mlflow
+reportlab

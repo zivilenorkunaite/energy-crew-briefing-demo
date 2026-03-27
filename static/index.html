@@ -695,6 +695,39 @@
       send();
     }
 
+    async function downloadBriefingPdf(btn) {
+      const response = decodeURIComponent(escape(atob(btn.dataset.response)));
+      const sources = JSON.parse(btn.dataset.sources || '[]');
+      btn.textContent = '⏳ Generating...';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/briefing/pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response,
+            sources,
+            crew: currentSession ? currentSession.title : '',
+            briefing_date: new Date().toLocaleDateString('en-AU', {day:'numeric', month:'long', year:'numeric'}),
+          }),
+        });
+        if (!res.ok) throw new Error('PDF generation failed');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `briefing_${Date.now()}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error(e);
+        alert('Failed to generate PDF');
+      } finally {
+        btn.textContent = '📄 Download PDF';
+        btn.disabled = false;
+      }
+    }
+
     function scrollDown() {
       const c = document.getElementById('chat');
       c.scrollTop = c.scrollHeight;
@@ -723,11 +756,14 @@
       const div = document.createElement('div');
       div.className = 'msg assistant';
       const html = marked.parse(text || '');
+      const isBriefing = text && (text.toLowerCase().includes('crew briefing') || text.toLowerCase().includes('work summary') || text.toLowerCase().includes('work orders'));
+      const downloadBtn = isBriefing ? `<div style="margin-top:8px;"><button class="btn-download-pdf" onclick="downloadBriefingPdf(this)" data-response="${btoa(unescape(encodeURIComponent(text)))}" data-sources='${JSON.stringify(sources || [])}' style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>` : '';
       div.innerHTML = `<div class="avatar av-ai">AI</div>
         <div class="msg-body">
           ${buildStepsHtml(steps || [])}
           <div class="bubble">${html}</div>
           ${_buildSourceChips(sources)}
+          ${downloadBtn}
         </div>`;
       document.getElementById('chat').appendChild(div);
     }
@@ -917,10 +953,16 @@
                     bubble.removeAttribute('id');
                     bubble.innerHTML = marked.parse(result.response);
                   }
-                  // Add source chips
+                  // Add source chips + download button
                   const body = streamMsg.querySelector('.msg-body');
-                  if (body && result.sources && result.sources.length) {
-                    body.insertAdjacentHTML('beforeend', _buildSourceChips(result.sources));
+                  if (body) {
+                    if (result.sources && result.sources.length) {
+                      body.insertAdjacentHTML('beforeend', _buildSourceChips(result.sources));
+                    }
+                    const isBriefing = result.response && (result.response.toLowerCase().includes('crew briefing') || result.response.toLowerCase().includes('work summary'));
+                    if (isBriefing) {
+                      body.insertAdjacentHTML('beforeend', `<div style="margin-top:8px;"><button class="btn-download-pdf" onclick="downloadBriefingPdf(this)" data-response="${btoa(unescape(encodeURIComponent(result.response)))}" data-sources='${JSON.stringify(result.sources || [])}' style="background:var(--brand-primary);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">📄 Download PDF</button></div>`);
+                    }
                   }
                 } else {
                   removeThinking();

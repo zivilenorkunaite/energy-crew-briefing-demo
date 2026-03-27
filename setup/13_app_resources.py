@@ -115,6 +115,7 @@ def grant_uc_permissions(app):
         f"GRANT USE_SCHEMA ON SCHEMA {UC_FULL} TO `{sp_client_id}`",
         f"GRANT SELECT ON SCHEMA {UC_FULL} TO `{sp_client_id}`",
         f"GRANT EXECUTE ON FUNCTION {UC_FULL}.get_weather TO `{sp_client_id}`",
+        f"GRANT READ_VOLUME ON VOLUME {UC_FULL}.asset_images TO `{sp_client_id}`",
     ]
     for sql in grants:
         result = run_sql(sql)
