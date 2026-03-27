@@ -948,9 +948,9 @@ def insert_work_orders(wos: list[dict]):
                 f"({w['id']}, '{w['wo_number']}', {w['project_id']}, {w['asset_id']}, "
                 f"'{title}', '{w['wo_type']}', '{w['priority']}', '{w['status']}', "
                 f"'{w['created_date']}', '{w['scheduled_date']}', {cd}, "
-                f"{w['estimated_hours']}, {ah}, '{crew}', '{loc}', '{desc}')"
+                f"{w['estimated_hours']}, {ah}, '{crew}', '{desc}', '{loc}')"
             )
-        sql = f"INSERT INTO {UC_FULL}.work_orders VALUES {', '.join(values)}"
+        sql = f"INSERT INTO {UC_FULL}.work_orders (id, wo_number, project_id, asset_id, title, wo_type, priority, status, created_date, scheduled_date, completed_date, estimated_hours, actual_hours, assigned_crew, description, location) VALUES {', '.join(values)}"
         result = run_sql(sql)
         if result is None:
             print(f"  Batch {i//batch_size + 1}: FAILED")
